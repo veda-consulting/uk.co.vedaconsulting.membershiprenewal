@@ -4,6 +4,9 @@
 
 This extension makes membership communications easier by creating activities for sending welcome email, renewal letters/email.
 
+### Important Note ###
+
+Please note that this extension does not handle the membership renewals, but helps you to make the membership renewal communication easy.
 
 ### Installation ###
 
