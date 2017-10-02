@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="iso-8859-1" ?>
+
+<CustomData>
+  <CustomGroups>
+    <CustomGroup>
+      <name>Membership_Renewal_Information</name>
+      <title>Membership Renewal Information</title>
+      <extends>Activity</extends>
+      <style>Inline</style>
+      <collapse_display>0</collapse_display>
+      <help_pre></help_pre>
+      <help_post></help_post>
+      <weight>1</weight>
+      <is_active>1</is_active>
+      <table_name>civicrm_value_membership_renewal_information</table_name>
+      <is_multiple>1</is_multiple>
+      <collapse_adv_display>0</collapse_adv_display>
+      <created_date></created_date>
+      <is_reserved>0</is_reserved>
+    </CustomGroup>
+  </CustomGroups>
+  <CustomFields>
+    <CustomField>
+      <name>Membership_ID</name>
+      <label>Membership ID</label>
+      <data_type>String</data_type>
+      <html_type>Text</html_type>
+      <is_required>0</is_required>
+      <is_searchable>1</is_searchable>
+      <is_search_range>0</is_search_range>
+      <weight>1</weight>
+      <is_active>1</is_active>
+      <is_view>1</is_view>
+      <text_length>255</text_length>
+      <note_columns>150</note_columns>
+      <note_rows>4</note_rows>
+      <column_name>membership_id</column_name>
+      <custom_group_name>Membership_Renewal_Information</custom_group_name>
+      <in_selector>1</in_selector>
+    </CustomField>
+    <CustomField>
+      <name>Membership_End_Date</name>
+      <label>Membership End Date</label>
+      <data_type>Date</data_type>
+      <html_type>Select Date</html_type>
+      <is_required>0</is_required>
+      <is_searchable>1</is_searchable>
+      <is_search_range>0</is_search_range>
+      <weight>2</weight>
+      <help_post></help_post>
+      <is_active>1</is_active>
+      <is_view>1</is_view>
+      <start_date_years>30</start_date_years>
+      <end_date_years>0</end_date_years>
+      <date_format>dd/mm/yy</date_format>
+      <time_format>0</time_format>
+      <column_name>membership_end_date</column_name>
+      <in_selector>0</in_selector>
+      <custom_group_name>Membership_Renewal_Information</custom_group_name>
+    </CustomField>
+    <CustomField>
+      <name>Renewal_Activity_Status</name>
+      <label>Renewal Activity Status</label>
+      <data_type>String</data_type>
+      <html_type>Autocomplete-Select</html_type>
+      <is_required>0</is_required>
+      <is_searchable>1</is_searchable>
+      <is_search_range>0</is_search_range>
+      <weight>3</weight>
+      <is_active>1</is_active>
+      <is_view>1</is_view>
+      <text_length>255</text_length>
+      <note_columns>60</note_columns>
+      <note_rows>4</note_rows>
+      <column_name>renewal_activity_status</column_name>
+      <in_selector>0</in_selector>
+      <option_group_name>renewal_activity_status_20161028121000</option_group_name>
+      <custom_group_name>Membership_Renewal_Information</custom_group_name>
+    </CustomField>
+    <CustomField>
+      <name>Membership_Communication_Type</name>
+      <label>Membership Communication Type</label>
+      <data_type>String</data_type>
+      <html_type>Text</html_type>
+      <is_required>0</is_required>
+      <is_searchable>1</is_searchable>
+      <is_search_range>0</is_search_range>
+      <weight>4</weight>
+      <is_active>1</is_active>
+      <is_view>1</is_view>
+      <text_length>255</text_length>
+      <note_columns>150</note_columns>
+      <note_rows>4</note_rows>
+      <column_name>membership_communication_type</column_name>
+      <custom_group_name>Membership_Renewal_Information</custom_group_name>
+      <in_selector>1</in_selector>
+    </CustomField>
+  </CustomFields>
+	<OptionGroups>
+    <OptionGroup>
+      <name>activity_type</name>
+      <title>Activity Type</title>
+      <is_reserved>1</is_reserved>
+      <is_active>1</is_active>
+    </OptionGroup>
+    <OptionGroup>
+      <name>renewal_activity_status_20161028121000</name>
+      <title>Renewal Activity Status</title>
+      <is_reserved>1</is_reserved>
+      <is_active>1</is_active>
+    </OptionGroup>
+  </OptionGroups>
+  <OptionValues>
+    <OptionValue>
+      <label>Membership Communication - Email</label>
+      <name>Membership_Communication_Email</name>
+      <description>Activities for sending membership welcome or renewals emails</description>
+      <filter>0</filter>
+      <is_default>0</is_default>
+      <weight>1</weight>
+      <is_optgroup>0</is_optgroup>
+      <is_reserved>1</is_reserved>
+      <is_active>1</is_active>
+      <option_group_name>activity_type</option_group_name>
+    </OptionValue>
+    <OptionValue>
+      <label>Membership Communication - Letter</label>
+      <name>Membership_Communication_Letter</name>
+      <description>Activities for sending membership welcome or renewals via Post</description>
+      <filter>0</filter>
+      <is_default>0</is_default>
+      <weight>2</weight>
+      <is_optgroup>0</is_optgroup>
+      <is_reserved>1</is_reserved>
+      <is_active>1</is_active>
+      <option_group_name>activity_type</option_group_name>
+    </OptionValue>
+    <OptionValue>
+      <label>Membership Communication - Unknown</label>
+      <name>Membership_Communication_Unknown</name>
+      <description>Activities for sending membership welcome or renewals via alternative communication methods for contacts who dont have a valid email or postal address</description>
+      <filter>0</filter>
+      <is_default>0</is_default>
+      <weight>3</weight>
+      <is_optgroup>0</is_optgroup>
+      <is_reserved>1</is_reserved>
+      <is_active>1</is_active>
+      <option_group_name>activity_type</option_group_name>
+    </OptionValue>
+    <OptionValue>
+      <label>Emailed</label>
+      <value>Emailed</value>
+      <name>Emailed</name>
+      <is_default>0</is_default>
+      <weight>1</weight>
+      <is_optgroup>0</is_optgroup>
+      <is_reserved>1</is_reserved>
+      <is_active>1</is_active>
+      <option_group_name>renewal_activity_status_20161028121000</option_group_name>
+    </OptionValue>
+    <OptionValue>
+      <label>Printed</label>
+      <value>Printed</value>
+      <name>Printed</name>
+      <is_default>0</is_default>
+      <weight>2</weight>
+      <is_optgroup>0</is_optgroup>
+      <is_reserved>1</is_reserved>
+      <is_active>1</is_active>
+      <option_group_name>renewal_activity_status_20161028121000</option_group_name>
+    </OptionValue>
+  </OptionValues>
+</CustomData>

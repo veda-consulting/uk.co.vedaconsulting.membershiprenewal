@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<menu>
+  <item>
+    <path>civicrm/membershiprenewal</path>
+    <page_callback>CRM_Membershiprenewal_Page_Membershiprenewaldashboard</page_callback>
+    <title>Membership Renewal Dashboard</title>
+    <access_arguments>access CiviCRM</access_arguments>
+  </item>
+  <item>
+    <path>civicrm/membershiprenewal/settings</path>
+    <page_callback>CRM_Membershiprenewal_Form_Membershiprenewalsettings</page_callback>
+    <title>Membership Renewal Settings</title>
+    <access_arguments>access CiviCRM</access_arguments>
+  </item>
+  <item>
+    <path>civicrm/membershiprenewal/process</path>
+    <page_callback>CRM_Membershiprenewal_Form_Membershiprenewalprocess</page_callback>
+    <title>Membershiprenewalprocess</title>
+    <access_arguments>access CiviCRM</access_arguments>
+  </item>
+  <item>
+    <path>civicrm/membershiprenewal/batch</path>
+    <page_callback>CRM_Membershiprenewal_Form_Membershiprenewalbatch</page_callback>
+    <title>Membershiprenewalbatch</title>
+    <access_arguments>access CiviCRM</access_arguments>
+  </item>
+  <item>
+    <path>civicrm/membershiprenewal/move</path>
+    <page_callback>CRM_Membershiprenewal_Page_Membershiprenewalmove</page_callback>
+    <title>Membershiprenewalmove</title>
+    <access_arguments>access CiviCRM</access_arguments>
+  </item>
+  <item>
+    <path>civicrm/membershiprenewal/moveactivity</path>
+    <page_callback>CRM_Membershiprenewal_Page_MoveActivity</page_callback>
+    <title>MoveActivity</title>
+    <access_arguments>access CiviCRM</access_arguments>
+  </item>
+  <item>
+    <path>civicrm/membershiprenewal/viewsettings</path>
+    <page_callback>CRM_Membershiprenewal_Page_Membershiprenewalviewsettings</page_callback>
+    <title>Membershiprenewalviewsettings</title>
+    <access_arguments>access CiviCRM</access_arguments>
+  </item>
+</menu>
