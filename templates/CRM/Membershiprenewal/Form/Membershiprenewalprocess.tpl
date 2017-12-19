@@ -17,7 +17,7 @@
 			<br /><br />
 			{ts}<strong>You can only run the process once for the selected month/year</strong>. This process will create the activities which will be automatically emailed to the contacts via scheduled reminders (for the contacts who have a valid email address) and the activites for which the renewal letters can be printed (for the contacts who do not have a valid email address, but have a valid postal address).{/ts}
 			<br /><br />
-			{ts}<strong>Are you sure you want to process memberships?</strong>{/ts}
+			{ts}<strong>Are you sure you want to process membership communications?</strong>{/ts}
 		</div>
 	
 		<div class="crm-section">
@@ -472,4 +472,24 @@ function maxCharInfoDisplay(){
 {/if}
 
 {* FOOTER *}
+
+<div id="dialog" title="Processing" style="display: none;">
+  <p>Processing...<img src="{$config->resourceBase}i/loading.gif" style="width:15px;height:15px;" /></p>
+</div>
+
+{literal}
+<script>
+/*cj( document ).ready(function() {
+	cj("#_qf_Membershiprenewalprocess_submit-bottom").click(function() {
+		cj("#dialog").dialog({
+	  	width: 350,
+      height: 100,
+			modal: true,
+			closeOnEscape: false,
+	   		open: function(event, ui) { cj(".ui-dialog-titlebar-close").hide(); }
+		});
+	});
+});*/
+</script>
+{/literal}
 

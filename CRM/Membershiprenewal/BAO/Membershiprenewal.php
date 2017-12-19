@@ -125,12 +125,15 @@ class CRM_Membershiprenewal_BAO_Membershiprenewal {
 
       $config = CRM_Core_Config::singleton();
 
-      // Intialize clsTinyButStrong
-      require_once $config->extensionsDir.'/uk.co.vedaconsulting.module.wordmailmerge/tinybutstrong/tbs_class.php';
-      require_once $config->extensionsDir.'/uk.co.vedaconsulting.module.wordmailmerge/tinybutstrong-opentbs/tbs_plugin_opentbs.php';
-      $TBS = new clsTinyButStrong; // new instance of TBS
-      $TBS->Plugin(TBS_INSTALL, OPENTBS_PLUGIN); // load the OpenTBS plugin
-
+      if (file_exists($config->extensionsDir.'/uk.co.vedaconsulting.module.wordmailmerge/tinybutstrong/tbs_class.php')) {
+        // Intialize clsTinyButStrong
+        require_once $config->extensionsDir.'/uk.co.vedaconsulting.module.wordmailmerge/tinybutstrong/tbs_class.php';
+        require_once $config->extensionsDir.'/uk.co.vedaconsulting.module.wordmailmerge/tinybutstrong-opentbs/tbs_plugin_opentbs.php';
+        $TBS = new clsTinyButStrong; // new instance of TBS
+        $TBS->Plugin(TBS_INSTALL, OPENTBS_PLUGIN); // load the OpenTBS plugin
+      } else {
+        CRM_Core_Error::fatal(ts('Not able to load clsTinyButStrong class. Please make sure you have installed wordmailmerge extension.'));
+      }
     }
 
     // Loop through all activities and prepare letter html
@@ -139,107 +142,84 @@ class CRM_Membershiprenewal_BAO_Membershiprenewal {
     $processedActivities = array(); // To update activities to completed
 
   	foreach ($activities as $key => $activity) {
+
+      $activity['activity_type_name'] = $actTypes[$activity['activity_type_id']];
+
+      $isJoiner = FALSE;
+      if ($activity['communication_type'] == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_NEW_JOINER) {
+        $isJoiner = TRUE;
+      }
  
       // Prepare letters for only activities which are not yet printed
       if (empty($activity['renewal_activity_status'])) {
 
-        // This is word mail merge
+        // Check if word mail merge is enabled
         if ($settingsArray['enable_word_mailmerge'] == 1) {
+          // Check if a valid file is attached to the message template
+          $attachment = self::getFileAttachment($reminderType, $activity, $isJoiner);
+        }
 
-          // Word template - start
-          $actTypeName = $actTypes[$activity['activity_type_id']];
+        // This is word mail merge and we have a file attachment
+        if ($settingsArray['enable_word_mailmerge'] == 1 && !empty($attachment)) {
 
-          $isJoiner = FALSE;
-          if ($activity['communication_type'] == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_NEW_JOINER) {
-            $isJoiner = TRUE;
-          }
+          $template = $attachment;
 
-          $messageTemplateId = $fileId = '';
-          $messageTemplateId = CRM_Membershiprenewal_BAO_Batch::getMessageTemplateForRenewalReminder($reminderType, $activity['membership_type_id'], $actTypeName, $isJoiner);
+          $selectedCID = $activity['contact_id'];
 
-          if (!empty($messageTemplateId)) {
-            $mysql =  "SELECT * FROM veda_civicrm_wordmailmerge WHERE msg_template_id = %1";
-            $params = array(1 => array($messageTemplateId, 'Integer'));
-            $dao = CRM_Core_DAO::executeQuery($mysql, $params);
-            //$dao = CRM_Core_DAO::executeQuery($mysql);
-            if ($dao->fetch()) {
-              $fileId = $dao->file_id;
-            } else {
-              continue;
+          $contactFormatted = array();
+          $contactFormatted[$selectedCID] = $contactrows[$selectedCID];
+
+          $membershipFormatted = array();
+          $membershipFormatted = CRM_Utils_Token::getMembershipTokenDetails($activity['membership_id']);
+
+          foreach ($tokenMerge as $atKey => $atValue) {
+            // Replace hook tokens
+            $explodedTokenName = explode('.', $atValue['token_name']);
+            // this is fixed by assigning 'address_block' token into 'contact' token array // gopi@vedaconsulting.co.uk
+            //need to do proper fix seems token named as contact.address_block
+            // $atValue['token_name'] = ($atValue['token_name'] == 'address_block') ? 'contact.'.$atValue['token_name'] : $atValue['token_name'];
+            if (array_key_exists($atValue['token_name'], $contactFormatted[$selectedCID]) ) {
+              if (!empty($explodedTokenName[1]) && $explodedTokenName[0] != 'contact') {
+                $vars[$key][$explodedTokenName[0]][$explodedTokenName[1]] = $contactFormatted[$selectedCID][$atValue['token_name']];
+              }
+              else{
+                $vars[$key][$atValue['token_name']] = $contactFormatted[$selectedCID][$atValue['token_name']];
+              }
             }
-            $file_sql = "SELECT * FROM civicrm_file WHERE id = %1";
-            $file_params = array(1 => array($fileId, 'Integer'));
-            $file_dao = CRM_Core_DAO::executeQuery($file_sql, $file_params);
-            //$dao = CRM_Core_DAO::executeQuery($sql);
-            if ($file_dao->fetch()) {
-              $default['fileID']        = $file_dao->id;
-              $default['mime_type']     = $file_dao->mime_type;
-              $default['fileName']      = $file_dao->uri;
-              $default['cleanName']     = CRM_Utils_File::cleanFileName($file_dao->uri);
-              $default['fullPath']      = $config->customFileUploadDir . DIRECTORY_SEPARATOR . $file_dao->uri;
-              $default['deleteURLArgs'] = CRM_Core_BAO_File::deleteURLArgs('civicrm_file', $messageTemplateId, $file_dao->id);
-            } else {
-              continue;
-            }
-            $template = $default['fullPath'];
-
-            $selectedCID = $activity['contact_id'];
-
-            $contactFormatted = array();
-            $contactFormatted[$selectedCID] = $contactrows[$selectedCID];
-
-            $membershipFormatted = array();
-            $membershipFormatted = CRM_Utils_Token::getMembershipTokenDetails($activity['membership_id']);
-
-            foreach ($tokenMerge as $atKey => $atValue) {
-              // Replace hook tokens
-              $explodedTokenName = explode('.', $atValue['token_name']);
-              // this is fixed by assigning 'address_block' token into 'contact' token array // gopi@vedaconsulting.co.uk
-              //need to do proper fix seems token named as contact.address_block
-              // $atValue['token_name'] = ($atValue['token_name'] == 'address_block') ? 'contact.'.$atValue['token_name'] : $atValue['token_name'];
-              if (array_key_exists($atValue['token_name'], $contactFormatted[$selectedCID]) ) {
-                if (!empty($explodedTokenName[1]) && $explodedTokenName[0] != 'contact') {
-                  $vars[$key][$explodedTokenName[0]][$explodedTokenName[1]] = $contactFormatted[$selectedCID][$atValue['token_name']];
-                }
-                else{
-                  $vars[$key][$atValue['token_name']] = $contactFormatted[$selectedCID][$atValue['token_name']];
-                }
+            else {
+              if ($explodedTokenName[0] == 'membership') {
+                $explodedTokenName[1] = ($explodedTokenName[1] == 'membership_id') ? 'id' : $explodedTokenName[1];
+                $vars[$key][$explodedTokenName[0]][$explodedTokenName[1]] = CRM_Utils_Token::getMembershipTokenReplacement($explodedTokenName[0], $explodedTokenName[1], $membershipFormatted[$contactFormatted[$selectedCID]['membership_id']]);
               }
               else {
-                if ($explodedTokenName[0] == 'membership') {
-                  $explodedTokenName[1] = ($explodedTokenName[1] == 'membership_id') ? 'id' : $explodedTokenName[1];
-                  $vars[$key][$explodedTokenName[0]][$explodedTokenName[1]] = CRM_Utils_Token::getMembershipTokenReplacement($explodedTokenName[0], $explodedTokenName[1], $membershipFormatted[$contactFormatted[$selectedCID]['membership_id']]);
-                }
-                else {
-                  $vars[$key][$atValue['token_name']] = CRM_Utils_Token::getContactTokenReplacement($atValue['token_name'], $contactFormatted[$selectedCID], FALSE, FALSE);
-                }
-              }
-
-              //need to do proper fix, token_name.date seems not returning null value if not found
-              if ($explodedTokenName[0] == 'token_name' && !is_array($vars[$key]['token_name'])) {
-                $vars[$key][$atValue['token_name']] = '';
+                $vars[$key][$atValue['token_name']] = CRM_Utils_Token::getContactTokenReplacement($atValue['token_name'], $contactFormatted[$selectedCID], FALSE, FALSE);
               }
             }
 
-            foreach (CRM_Core_SelectValues::membershipTokens() as $token => $label) {
-              $token = str_replace(array('{','}'),"",$token);
-              $tokenNames = explode('.', $token);
-              $vars[$key]['membership'][$tokenNames[1]] = $label;
+            //need to do proper fix, token_name.date seems not returning null value if not found
+            if ($explodedTokenName[0] == 'token_name' && !is_array($vars[$key]['token_name'])) {
+              $vars[$key][$atValue['token_name']] = '';
             }
-
-            foreach ($vars[$key] as $varKey => $varValue) {
-              $explodeValues = explode('.', $varKey);
-              if (isset($explodeValues[1]) && !empty($explodeValues[1])) {
-                $vars[$key][$explodeValues[0]][$explodeValues[1]] = $vars[$key][$varKey];
-                unset($vars[$key][$varKey]);
-              }
-            }
-
-            $wordTemplates[] = $value;
-
-            $TBS->LoadTemplate($template, OPENTBS_ALREADY_UTF8);
-            $TBS->MergeBlock(self::TOKEN_VAR_NAME,$vars);
           }
+
+          foreach (CRM_Core_SelectValues::membershipTokens() as $token => $label) {
+            $token = str_replace(array('{','}'),"",$token);
+            $tokenNames = explode('.', $token);
+            $vars[$key]['membership'][$tokenNames[1]] = $label;
+          }
+
+          foreach ($vars[$key] as $varKey => $varValue) {
+            $explodeValues = explode('.', $varKey);
+            if (isset($explodeValues[1]) && !empty($explodeValues[1])) {
+              $vars[$key][$explodeValues[0]][$explodeValues[1]] = $vars[$key][$varKey];
+              unset($vars[$key][$varKey]);
+            }
+          }
+
+          $wordTemplates[] = $value;
+
+          $TBS->LoadTemplate($template, OPENTBS_ALREADY_UTF8);
+          $TBS->MergeBlock(self::TOKEN_VAR_NAME,$vars);
 
           // Word template - end
 
@@ -373,7 +353,7 @@ class CRM_Membershiprenewal_BAO_Membershiprenewal {
       $fileName = "Renewal-Letters-{$reminderLabel}-{$batchId}-{$upload_date}-PDF.pdf";
       $filePathName = "{$csv_path}{$fileName}";
       require_once 'CRM/Utils/PDF/Utils.php';
-      $pdfContent = CRM_Utils_PDF_Utils::html2pdf($html , $fileName , true , null );
+      $pdfContent = CRM_Utils_PDF_Utils::html2pdf($html , $fileName , true , CRM_Core_DAO::$_nullArray );
 
       $handle = fopen($filePathName, 'w');
       file_put_contents($filePathName, $pdfContent);
@@ -450,6 +430,19 @@ class CRM_Membershiprenewal_BAO_Membershiprenewal {
     //$text = $msgTemplateDetails['msg_text'];
     $html = $msgTemplateDetails['msg_html'];
 
+    // Get all core tokens
+    list($allTokens, $returnProperties) = self::getAllTokens($html, $subject);
+    list($contacts) = CRM_Utils_Token::getTokenDetails(
+      $contactParams,
+      $returnProperties,
+      FALSE,
+      FALSE,
+      array(array('membership_id', '=', $activityDetails['membership_id'], 0, 0)),
+      $allTokens
+    );
+
+    $hookTokens = self::getAllHookTokens();
+    $categories = array_keys($hookTokens);
 
     require_once("CRM/Mailing/BAO/Mailing.php");
     $mailing = new CRM_Mailing_BAO_Mailing;
@@ -462,12 +455,12 @@ class CRM_Membershiprenewal_BAO_Membershiprenewal {
     //$subject = CRM_Utils_Token::replaceDomainTokens($subject, $domain, true, $tokens['subject']);
     //$html    = CRM_Utils_Token::replaceDomainTokens($html, $domain, true, $tokens['html']);
     if ($contactId) {
-      $subject = CRM_Utils_Token::replaceContactTokens($subject, $contact, false, $tokens['subject']);
-      $html    = CRM_Utils_Token::replaceContactTokens($html, $contact, false, $tokens['html']);
+      $subject = CRM_Utils_Token::replaceContactTokens($subject, $contacts[$contactId], false, $tokens['subject']);
+      $html    = CRM_Utils_Token::replaceContactTokens($html, $contacts[$contactId], false, $tokens['html']);
       
       $category = array('contact');
-      $subject = CRM_Utils_Token::replaceHookTokens($subject, $contact , $category, false, false);
-      $html    = CRM_Utils_Token::replaceHookTokens($html, $contact , $category , true, false);
+      $subject = CRM_Utils_Token::replaceHookTokens($subject, $contacts[$contactId] , $categories, false, false);
+      $html    = CRM_Utils_Token::replaceHookTokens($html, $contacts[$contactId] , $categories , true, false);
     }
 
     $msgTemplateDetails['msg_subject'] = $subject;
@@ -486,6 +479,9 @@ class CRM_Membershiprenewal_BAO_Membershiprenewal {
       return;
     }
 
+    // Get membership renewal settings
+    $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+
     // Get membership details
     $membershipId = $activityDetails['membership_id'];
     $memParams = array ('id' => $membershipId);
@@ -499,7 +495,8 @@ class CRM_Membershiprenewal_BAO_Membershiprenewal {
     $membershipFees = $memTypeDetails['values'][$membership['membership_type_id']]['minimum_fee'];
 
     $membership['membership_fee'] = CRM_Utils_Money::format($membershipFees);
-    $membership['renewal_date'] = $activityDetails['activity_date_time'];
+    $membership['reminder_date'] = $activityDetails['activity_date_time'];
+    $membership['renewal_page_link'] = $settingsArray['renewal_page_tiny_url'];
 
     $subject = $msgTemplateDetails['msg_subject'];
     //$text = $msgTemplateDetails['msg_text'];
@@ -602,25 +599,109 @@ WHERE e.entity_id = %1 AND e.entity_table = %2 AND batchfiles.reminder_type = %3
    *
    * @return date $activityDate
    */
-  public static function getScheduledDateForFirstReminder($endDate, $settingsArray) {
+  public static function getScheduledDateForFirstReminder($endDate, $settingsArray, $isNewJoiner = FALSE) {
     if (empty($endDate) || empty($settingsArray['renewal_first_reminder'])) {
       return date("Y-m-d H:i:s");
     }
 
-    // Calculate activity date to membership end date minus 1st reminder offset from settings
-
     $currentTimeStamp = strtotime(date("Y-m-d"));
-    $endDateTimeStamp = strtotime($endDate);
-
-    $activityTimeStamp = strtotime("-{$settingsArray['renewal_first_reminder']} day", $endDateTimeStamp);
+    if ($isNewJoiner) {
+      // Send welcome email in the next hour for new joiners
+      $activityTimeStamp = $currentTimeStamp;
+    } else {
+      // Calculate activity date to membership end date minus 1st reminder offset from settings
+      $endDateTimeStamp = strtotime($endDate);
+      $activityTimeStamp = strtotime("-{$settingsArray['renewal_first_reminder']} day", $endDateTimeStamp);
+    }
 
     if ($activityTimeStamp < $currentTimeStamp) {
       $activityTimeStamp = $currentTimeStamp;
     }
     $activityDate = date("Y-m-d", $activityTimeStamp).' '.date("G").':00:00';
     // Set next hour for activity time
-    $activityDate = date('Y-m-d H:i:s', strtotime('+1 hour', strtotime($activityDate)));
+    $activityDate = date('Y-m-d H:i:s', strtotime('+0 minutes', strtotime($activityDate)));
 
     return $activityDate;
+  }
+
+  /**
+   * Function to get all core tokens
+   */
+  public static function getAllTokens($html, $subject) {
+    $domain = CRM_Core_BAO_Domain::getDomain();
+
+    $tplTokens = array_merge(
+      CRM_Utils_Token::getTokens($html),
+      CRM_Utils_Token::getTokens($subject));
+
+    $tokens = CRM_Core_SelectValues::contactTokens();
+    $tokens = $tokens + CRM_Core_SelectValues::membershipTokens();
+
+    $tokenMerge = array();
+    foreach ($tokens as $key => $label) {
+      $tokenMerge[] = array(
+        'id' => $key,
+        'text' => $label,
+      );
+    }
+
+    foreach ($tokenMerge as $tmKey => $tmValue) {
+      $tokenFullName =  str_replace(array('{','}'),"",$tmValue['id']);
+      $explodedTokenName =  explode('.', $tokenFullName);
+      $allTokens[$explodedTokenName[0]][] = $explodedTokenName[1];
+      if ($explodedTokenName[0] == 'contact') {
+        $returnProperties[$explodedTokenName[1]] = 1;
+      }
+    }
+    $allTokens = $allTokens + $tplTokens;
+
+    return array($allTokens, $returnProperties);
+  }
+
+  /**
+   * Function to get all hook tokens
+   */
+  public static function getAllHookTokens() {
+    // call token hook
+    $hookTokens = array();
+    CRM_Utils_Hook::tokens($hookTokens);
+    return $hookTokens;
+  }
+
+  /**
+   * Function to check if file is attached to message template
+   */
+  public static function getFileAttachment($reminderType, $activity, $isJoiner = FALSE) {
+
+    $template = '';
+
+    $messageTemplateId = $fileId = '';
+    $messageTemplateId = CRM_Membershiprenewal_BAO_Batch::getMessageTemplateForRenewalReminder($reminderType, $activity['membership_type_id'], $activity['activity_type_name'], $isJoiner);
+
+    if (!empty($messageTemplateId) && CRM_Core_DAO::checkTableExists('veda_civicrm_wordmailmerge')) {
+      $mysql =  "SELECT * FROM veda_civicrm_wordmailmerge WHERE msg_template_id = %1";
+      $params = array(1 => array($messageTemplateId, 'Integer'));
+      $dao = CRM_Core_DAO::executeQuery($mysql, $params);
+      if ($dao->fetch()) {
+        $fileId = $dao->file_id;
+      }
+      if (!empty($fileId)) {
+        $file_sql = "SELECT * FROM civicrm_file WHERE id = %1";
+        $file_params = array(1 => array($fileId, 'Integer'));
+        $file_dao = CRM_Core_DAO::executeQuery($file_sql, $file_params);
+        //$dao = CRM_Core_DAO::executeQuery($sql);
+        if ($file_dao->fetch()) {
+          $default['fileID']        = $file_dao->id;
+          $default['mime_type']     = $file_dao->mime_type;
+          $default['fileName']      = $file_dao->uri;
+          $default['cleanName']     = CRM_Utils_File::cleanFileName($file_dao->uri);
+          $default['fullPath']      = $config->customFileUploadDir . DIRECTORY_SEPARATOR . $file_dao->uri;
+          $default['deleteURLArgs'] = CRM_Core_BAO_File::deleteURLArgs('civicrm_file', $messageTemplateId, $file_dao->id);
+        }
+        $template = $default['fullPath'];
+      }
+    }
+
+    return $template;
   }
 }

@@ -5,22 +5,13 @@
 {/if}
 <div class="crm-block crm-form-block crm-dotmailer-mapping-list-form-block">
     <div>
-      <!--<div id="help">
-        {ts}Some help text here ...{/ts}
-      </div>-->
-
       {if $memRenewalSettingsNotSet}
         {* Membership renewal settings are not done yet *}
-
         <div id="help">
-
           {ts}Membership communications parameters not set. Click <a href="{crmURL p="civicrm/membershiprenewal/settings" q="reset=1"}">here</a> to add the communications parameters.{/ts}
         </div>
-
       {else}
-
-      <div>
-
+        <div>
           Click the below button to process the communications for {if $memRenewalSettings.include_joiner eq 1} new joiners and renewals {else} renewals {/if}
           <br /><br />
           {foreach from=$renewalList key=key item=value}
@@ -29,9 +20,7 @@
 
           <br /><br />
           {/foreach}
-
-      </div>
-
+        </div>
       {/if}
 
       {if $batchList}
@@ -41,7 +30,6 @@
         <th scope="col">{ts}Batch #{/ts}</th>
          <th scope="col">{ts}Title{/ts}</th>
          <th scope="col">{ts}Month/Year{/ts}</th>
-         <!--<th scope="col">{ts}Created Date{/ts}</th>-->
          <th scope="col">{ts}Action{/ts}</th>
         </tr>
         </thead>
@@ -52,11 +40,6 @@
           <td>{$batchDetails.id}</td>
           <td>{$batchDetails.title}</td>
           <td>{$batchDetails.renewal_month_year_label}</td>
-          <!--<td>{$batchDetails.created_date}</td>-->
-          <!--<td>
-            <a href='{crmURL p="civicrm/membershiprenewal/batch" q="id=$id&reset=1"}'>View</a
-            >
-          </td>-->
           <td>
             <span class="btn-slide crm-hover-button">
             View...

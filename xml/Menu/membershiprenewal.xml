@@ -42,4 +42,10 @@
     <title>Membershiprenewalviewsettings</title>
     <access_arguments>access CiviCRM</access_arguments>
   </item>
+  <item>
+    <path>civicrm/renewal/single</path>
+    <page_callback>CRM_Membershiprenewal_Page_MembershipRenewalSingle</page_callback>
+    <title>MembershipRenewalSingle</title>
+    <access_arguments>access CiviCRM</access_arguments>
+  </item>
 </menu>

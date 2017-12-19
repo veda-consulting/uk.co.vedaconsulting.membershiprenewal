@@ -14,11 +14,18 @@ function civicrm_api3_membershiprenewal_preparerenewaldates($params) {
   // Prepare renewal dates
   CRM_Membershiprenewal_Utils::prepareRenewalDatesForMemberships();
 
+  // Get membership renewal settings
+  $settings = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+
   // Create 2nd renewal reminder activities
-  CRM_Membershiprenewal_BAO_Batch::createRenewalReminders(2);
+  if (isset($settings['enable_second_reminder']) && $settings['enable_second_reminder'] == 1) {
+		CRM_Membershiprenewal_BAO_Batch::createRenewalReminders(2);
+	}
 
   // Create 3rd renewal reminder activities
-  CRM_Membershiprenewal_BAO_Batch::createRenewalReminders(3);
+  if (isset($settings['enable_third_reminder']) && $settings['enable_third_reminder'] == 1) {
+		CRM_Membershiprenewal_BAO_Batch::createRenewalReminders(3);
+	}
 
   $returnValues = array();
   // Return success

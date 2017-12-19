@@ -99,8 +99,13 @@ class CRM_Membershiprenewal_Constants {
   const MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_NEW_JOINER = 'New Joiner';
   const MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_RENEWAL = 'Renewal';
 
-
   const MEMBERSHIP_RENEWAL_START_YEAR_MONTH_OFFSET = 12;
+
+  const MEMBERSHIP_RENEWAL_QUEUE_NAME = 'process-membership-communications';
+
+  const BATCH_COUNT = 10;
+  const END_URL = 'civicrm/membershiprenewal/process';
+  const END_PARAMS = 'state=done';
 
   // Months array
   public static $months = array(
@@ -125,7 +130,9 @@ class CRM_Membershiprenewal_Constants {
     'Join Date' => '{membershiprenewal.join_date}',
     'Start Date' => '{membershiprenewal.start_date}',
     'End Date' => '{membershiprenewal.end_date}',
-    'Renewal Date' => '{membershiprenewal.renewal_date}',
+    'Reminder Date' => '{membershiprenewal.reminder_date}',
+    //'Renewal Date' => '{membershiprenewal.renewal_date}',
+    'Renewal Page Link' => '{membershiprenewal.renewal_page_link}',
   );
 
   // Reminder type
