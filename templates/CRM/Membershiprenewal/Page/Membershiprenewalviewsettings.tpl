@@ -27,6 +27,10 @@
                 </thead>
                 <tbody>
                 <tr>
+                  <td>Include New Joiners?</td>
+                  <td>{if $memRenewalSettings.include_joiner}Yes{else}No{/if}</td>
+                </tr>
+                <tr>
                   <td>Renewal Years</td>
                   <td>{$memRenewalSettings.renewal_years} years</td>
                 </tr>
@@ -34,25 +38,39 @@
                   <td>Renewal Period</td>
                   <td>{$memRenewalSettings.renewal_period} months</td>
                 </tr>
-                <tr>
+                <!--<tr>
                   <td>Start Offset</td>
                   <td>{$memRenewalSettings.renewal_start_offset} months</td>
-                </tr>
+                </tr>-->
                 <!--<tr>
                   <td>End Offset</td>
                   <td>{$memRenewalSettings.renewal_end_offset} months</td>
                 </tr>-->
+                {if $memRenewalSettings.renewal_first_reminder}
                 <tr>
                   <td>1st Reminder</td>
                   <td>{$memRenewalSettings.renewal_first_reminder} days</td>
                 </tr>
+                {/if}
                 <tr>
                   <td>2nd Reminder</td>
-                  <td>{$memRenewalSettings.renewal_second_reminder} days</td>
+                  <td>
+                    {if $memRenewalSettings.enable_second_reminder}
+                      {$memRenewalSettings.renewal_second_reminder} days
+                    {else}
+                      {ts}Disabled{/ts}
+                    {/if}
+                  </td>
                 </tr>
                 <tr>
                   <td>3rd Reminder</td>
-                  <td>{$memRenewalSettings.renewal_third_reminder} days</td>
+                  <td>
+                    {if $memRenewalSettings.enable_third_reminder}
+                      {$memRenewalSettings.renewal_third_reminder} days
+                    {else}
+                      {ts}Disabled{/ts}
+                    {/if}
+                  </td>
                 </tr>
                 <!--<tr>
                   <td>Email Message template</td>

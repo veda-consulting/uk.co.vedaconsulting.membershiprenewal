@@ -9,6 +9,64 @@ require_once 'CRM/Core/Form.php';
  */
 class CRM_Membershiprenewal_Form_Membershiprenewalprocess extends CRM_Core_Form {
 
+  public function preProcess() {
+    $state = CRM_Utils_Request::retrieve('state', 'String', CRM_Core_DAO::$_nullObject, FALSE, 'tmp', 'GET');
+    // Import is done, so display the results
+    if ($state == 'done') {
+      $renewalDetailsTable = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_BATCH_TEMP_TABLE;
+      $getActivitiesCountSql = "SELECT count(*) as count FROM {$renewalDetailsTable} WHERE activity_id IS NOT NULL";
+      $activitiesCount = CRM_Core_DAO::singleValueQuery($getActivitiesCountSql);
+
+      // If activities are created, then create batch
+      if ($activitiesCount > 0) {
+
+        $month_year = CRM_Utils_Request::retrieve('month_year', 'String', CRM_Core_DAO::$_nullObject, FALSE, 'tmp', 'GET');
+
+        $title = CRM_Utils_Request::retrieve('title', 'String', CRM_Core_DAO::$_nullObject, FALSE, 'tmp', 'GET');
+
+        $selectedPeriodArray = explode('-', $month_year);
+
+        // Date when the batch is created (also used as renewal date)
+        $createdDate = date("Y-m-d H:i:s");
+
+        // Create renewal batch
+        $batchParams['title'] = $title;
+        $batchParams['created_date'] = $createdDate;
+        // Set first reminder as the batch created date
+        $batchParams['first_reminder_date'] = $createdDate;
+        $batchParams['renewal_month_year'] = $month_year;
+        $batch = CRM_Membershiprenewal_BAO_Batch::createRenewalBatch($batchParams);
+
+        $batchId = $batch->id;
+
+        // Insert into civicrm_membership_renewal_entity_batch table
+        // This is first reminder
+        if (!empty($batchId)) {
+          CRM_Membershiprenewal_BAO_Batch::insertActivitiesForBatch($batchId, $reminder = 1);
+        }
+        $message = "Activities created for membership communication(s).";
+        $status = 'success';
+
+        // Redirect to batch screen, where the user can send emails, print letters, etc
+        $url = CRM_Utils_System::url('civicrm/membershiprenewal/batch', "id={$batchId}&reminderType=1&reset=1");
+      } else {
+        $message = "No activities created for membership communication(s), as no memberships are up for renewal for the selected month/year.<br/>No batch created.";
+        $status = 'warning';
+
+        // redirect to membership renewal dashboard
+        $url = CRM_Utils_System::url('civicrm/membershiprenewal', "reset=1");
+      }
+
+      // Save all details in renewal log table
+      if (!empty($batchId)) {
+        CRM_Membershiprenewal_BAO_Batch::recordRenewalLog($batchId);
+      }
+
+      // Set message and redirect
+      CRM_Membershiprenewal_Utils::setMessageAndRedirect($message, 'Membership Communication(s)', $status, $url);
+    }
+  }
+
   /**
    * Set default values for the form.
    */
@@ -18,8 +76,10 @@ class CRM_Membershiprenewal_Form_Membershiprenewalprocess extends CRM_Core_Form 
     $defaults['month_year'] = CRM_Utils_Array::value('month_year', $_GET);
     // Get membership renewal settings
     $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
-    $defaults['sms_text_message'] = $settingsArray['sms_text_message'];
-    $defaults['activity_subject'] = $settingsArray['sms_activity_subject'];
+    if ($settingsArray['enable_sms'] == 1) {
+      $defaults['sms_text_message'] = $settingsArray['sms_text_message'];
+      $defaults['activity_subject'] = $settingsArray['sms_activity_subject'];
+    }
     return $defaults;
   }
 
@@ -40,7 +100,7 @@ class CRM_Membershiprenewal_Form_Membershiprenewalprocess extends CRM_Core_Form 
     if (isset($settingsArray['include_joiner']) && $settingsArray['include_joiner'] == 1) {
       CRM_Utils_System::setTitle(ts('Process Membership Communications - New Joiners & Renewals'));
     } else {
-      CRM_Utils_System::setTitle(ts('Process Membership Communications - Renewals'));      
+      CRM_Utils_System::setTitle(ts('Process Membership Communications - Renewals'));
     }
 
     $month = $selectedPeriodArray[0];
@@ -101,6 +161,7 @@ class CRM_Membershiprenewal_Form_Membershiprenewalprocess extends CRM_Core_Form 
         'type' => 'submit',
         'name' => ts('Proceed >>'),
         'isDefault' => TRUE,
+        'js' => array('onclick' => "return submitOnce(this,'" . $this->_name . "','" . ts('Processing') . "');"),
       ),
     ));
 
@@ -155,8 +216,6 @@ class CRM_Membershiprenewal_Form_Membershiprenewalprocess extends CRM_Core_Form 
 
     $this->assign('memRenewalSettings', $settingsArray);
 
-    // export form elements
-    $this->assign('elementNames', $this->getRenderableElementNames());
     parent::buildQuickForm();
   }
 
@@ -167,7 +226,7 @@ class CRM_Membershiprenewal_Form_Membershiprenewalprocess extends CRM_Core_Form 
     $batch = new CRM_Membershiprenewal_DAO_Batch();
     $batch->renewal_month_year = $values['month_year'];
     if ($batch->find(TRUE)) {
-      $errors['month_year'] = ts('Membership renewals already processed for this month/year. Please choose a different month/year.');
+      // $errors['month_year'] = ts('Membership renewals already processed for this month/year. Please choose a different month/year.');
     }
 
     // Check if batch name is already used
@@ -205,75 +264,84 @@ class CRM_Membershiprenewal_Form_Membershiprenewalprocess extends CRM_Core_Form 
       }
     }
 
-    // Date when the batch is created (also used as renewal date)
-    $createdDate = date("Y-m-d H:i:s");
-    $tempTableName = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_BATCH_TEMP_TABLE;
-
-    // get month & year from submitted values
-    $selectedPeriodArray = explode('-', $values['month_year']);
-
-    // First create the activities
-    $result = CRM_Membershiprenewal_BAO_Batch::createActivities($selectedPeriodArray[0], $selectedPeriodArray[1]);
-
-    $activityIds = $result['activities'];
-
-    // If activities are created, then create batch
-    if (!empty($activityIds)) {
-      // Create renewal batch
-      $batchParams['title'] = $values['title'];
-      $batchParams['created_date'] = $createdDate;
-      // Set first reminder as the batch created date
-      $batchParams['first_reminder_date'] = $createdDate; 
-      $batchParams['renewal_month_year'] = $values['month_year'];
-      $batch = CRM_Membershiprenewal_BAO_Batch::createRenewalBatch($batchParams);
-
-      $batchId = $batch->id;
-
-      // Insert into civicrm_membership_renewal_entity_batch table
-      // This is first reminder
-      if (!empty($batchId)) {
-        CRM_Membershiprenewal_BAO_Batch::insertActivitiesForBatch($batchId, $reminder = 1);
-      }
-      $message = "Activities created for membership communication(s).";
-      $status = 'success';
-
-      // Redirect to batch screen, where the user can send emails, print letters, etc
-      $url = CRM_Utils_System::url('civicrm/membershiprenewal/batch', "id={$batchId}&reminderType=1&reset=1");
-    } else {
-      $message = "No activities created for membership communication(s), as no memberships are up for renewal for the selected month/year.<br/>No batch created.";
-      $status = 'warning';
-
-      // redirect to membership renewal dashboard
-      $url = CRM_Utils_System::url('civicrm/membershiprenewal', "reset=1");
+    $runner = self::getRunner($values);
+    if ($runner) {
+      // Run Everything in the Queue via the Web.
+      $runner->runAllViaWeb();
     }
-
-    // Save all details in renewal log table
-    if (!empty($batchId)) {
-      CRM_Membershiprenewal_BAO_Batch::recordRenewalLog($batchId);
-    }
-
-    // Set message and redirect
-    CRM_Membershiprenewal_Utils::setMessageAndRedirect($message, 'Membership Communication(s)', $status, $url);
   }
 
-  /**
-   * Get the fields/elements defined in this form.
-   *
-   * @return array (string)
-   */
-  function getRenderableElementNames() {
-    // The _elements list includes some items which should not be
-    // auto-rendered in the loop -- such as "qfKey" and "buttons".  These
-    // items don't have labels.  We'll identify renderable by filtering on
-    // the 'label'.
-    $elementNames = array();
-    foreach ($this->_elements as $element) {
-      /** @var HTML_QuickForm_Element $element */
-      $label = $element->getLabel();
-      if (!empty($label)) {
-        $elementNames[] = $element->getName();
-      }
+  static function getRunner($values) {
+
+    // Create queue for creating activities
+    $queue = CRM_Queue_Service::singleton()->create(array(
+      'name' => CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_QUEUE_NAME,
+      'type' => 'Sql',
+      'reset' => TRUE,
+    ));
+
+    $result = array(
+      'activities' => array(),
+      'excluded' => array(),
+    );
+
+    // Renewal details table
+    $renewalDetailsTable = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_BATCH_TEMP_TABLE;
+    $communicationsSql = "SELECT * FROM {$renewalDetailsTable} WHERE status = 1";
+    $communicationsRes = CRM_Core_DAO::executeQuery($communicationsSql);
+    $communications = array();
+    while($communicationsRes->fetch()) {
+      $communications[] = $communicationsRes->id;
     }
-    return $elementNames;
+    $count = count($communications);
+
+    // Set the Number of Rounds
+    $rounds = ceil($count/CRM_Membershiprenewal_Constants::BATCH_COUNT);
+
+    // Setup a Task in the Queue
+    $i = 0;
+    while ($i < $rounds) {
+      $start = $i * CRM_Membershiprenewal_Constants::BATCH_COUNT;
+      $communicationsArray = array_slice($communications, $start, CRM_Membershiprenewal_Constants::BATCH_COUNT, TRUE);
+
+      CRM_Core_Error::debug_var('communicationsArray', $communicationsArray);
+
+      $counter = ($rounds > 1) ? ($start + CRM_Membershiprenewal_Constants::BATCH_COUNT) : $count;
+      $task = new CRM_Queue_Task(
+        array('CRM_Membershiprenewal_BAO_Batch', 'createActivities'),
+        array($communicationsArray),
+        "Processing communcations {$counter} of {$count}"
+      );
+
+      // Add the Task to the Queue
+      $queue->createItem($task);
+      $i++;
+    }
+
+    if (!empty($communications)) {
+
+      $endParams = CRM_Membershiprenewal_Constants::END_PARAMS.'&month_year='.$values['month_year'].'&title='.$values['title'];
+
+      // Get membership renewal settings
+      $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+      if (isset($settingsArray['include_joiner']) && $settingsArray['include_joiner'] == 1) {
+        $title = ts('Process Membership Communications - New Joiners & Renewals');
+      } else {
+        $title = ts('Process Membership Communications - Renewals');
+      }
+
+
+      // Setup the Runner
+      $runner = new CRM_Queue_Runner(array(
+        'title' => $title,
+        'queue' => $queue,
+        'errorMode'=> CRM_Queue_Runner::ERROR_ABORT,
+        'onEndUrl' => CRM_Utils_System::url(CRM_Membershiprenewal_Constants::END_URL, $endParams, TRUE, NULL, FALSE),
+      ));
+
+      return $runner;
+    }
+
+    return FALSE;
   }
 }
