@@ -297,6 +297,14 @@ LEFT JOIN civicrm_membership m ON m.id = custom.{$customFieldColumnName}
 
     $batchIds = array();
 
+    // RS: Check if "membership status exclude" setting is set. If yes, exclude them from selection
+    $excludedMemStatusSQL = '';
+    $excludedMemStatus = $settingsArray['membership_status'];
+    if (!empty($excludedMemStatus)) {
+      $excludedMemStatusStr = implode(',', $excludedMemStatus);
+      $excludedMemStatusSQL = " AND m.status_id NOT IN ({$excludedMemStatusStr})";
+    }
+
     // Get all activities for reminder
     // Get only memberships which are not renewed
     // Check if the membership end date is same as the end date saved in activity
@@ -304,17 +312,18 @@ LEFT JOIN civicrm_membership m ON m.id = custom.{$customFieldColumnName}
     /*$selectSql = "SELECT * from {$tableName} WHERE {$columnName} IS NULL AND DATE_ADD(created_date,INTERVAL {$noOfdays} DAY) <= %1";*/
     $previousReminder = $reminder_type - 1;
     $selectSql = 
-"SELECT b.renewal_month_year, b.id as batch_id, eb.activity_id, m.contact_id, email.email, address.street_address, address.postal_code, contact.do_not_email, contact.do_not_mail, contact.is_opt_out, m.id as membership_id, m.membership_type_id, m.end_date as end_date FROM {$batchEntitiesTableName} eb
+"SELECT b.renewal_month_year, b.id as batch_id, eb.activity_id, m.contact_id, email.email, address.street_address, address.supplemental_address_1, address.supplemental_address_2, address.supplemental_address_3, address.postal_code, contact.do_not_email, contact.do_not_mail, contact.is_opt_out, m.id as membership_id, m.membership_type_id, m.end_date as end_date, ac.membership_communication_type as communication_type, recur.payment_instrument_id FROM {$batchEntitiesTableName} eb
 LEFT JOIN {$batchTableName} b ON eb.batch_id = b.id
 INNER JOIN {$activitiesCustomTableName} ac ON eb.activity_id = ac.entity_id
 INNER JOIN civicrm_membership m ON ac.membership_id = m.id
+LEFT JOIN civicrm_contribution_recur recur ON m.contribution_recur_id = recur.id
 LEFT JOIN civicrm_contact contact ON m.contact_id = contact.id
 LEFT JOIN civicrm_email email ON m.contact_id = email.contact_id AND email.on_hold = 0 AND email.is_primary = 1
 LEFT JOIN civicrm_address address ON m.contact_id = address.contact_id AND address.is_primary = 1
 WHERE ac.membership_end_date = m.end_date
 AND b.{$columnName} IS NULL
 AND DATE_SUB(m.end_date, INTERVAL {$noOfdays} DAY) <= %1
-AND eb.reminder_type = %2
+AND eb.reminder_type = %2 {$excludedMemStatusSQL}
 GROUP BY eb.activity_id
 ";
     $selectParams = array(
@@ -327,9 +336,9 @@ GROUP BY eb.activity_id
       // $monthYearArray = explode('-', $selectDao->renewal_month_year);
 
       // Create activities for 2nd renewal reminder
-      //$activityIds = CRM_Membershiprenewal_BAO_Batch::createActivitiesForRenewals($monthYearArray[0], $monthYearArray[1]);
+      //$activityIds = self::createActivitiesForRenewals($monthYearArray[0], $monthYearArray[1]);
 
-      $activityId = CRM_Membershiprenewal_BAO_Batch::createActivitiesForRenewalReminders($selectDao, $currentDate, $reminder_type, $settingsArray);
+      $activityId = self::createActivitiesForRenewalReminders($selectDao, $currentDate, $reminder_type, $settingsArray);
 
       // Skip if $activityId is empty
       // as this might be 'No action' for the membership type
@@ -372,11 +381,23 @@ VALUES ({$batchId}, {$activityId}, {$reminder_type})
    */
   public static function createActivitiesForRenewalReminders($activityObj, $currentDate, $reminder_type, $settingsArray) {
 
+    $isJoiner = FALSE;
+    if ($activityObj->communication_type == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_NEW_JOINER) {
+      $isJoiner = TRUE;
+    }
+
+    $isAutoRenew = FALSE;
+    // Check if the membership is set for auto-renew (only for renewals)
+    // using the payment method in the related recurring record
+    if ($isJoiner == FALSE) {
+      $isAutoRenew = self::checkIfRecurringIsAutoRenew($activityObj, $settingsArray);
+    }
+
     // Get activity type name by checking email, address and communication preference      
-    $activityType = CRM_Membershiprenewal_BAO_Batch::getActivityTypeID($activityObj);
+    $activityType = self::getActivityTypeID($activityObj);
 
     // Get message templates for reminder and membership type
-    $messageTemplateId = self::getMessageTemplateForRenewalReminder($reminder_type, $activityObj->membership_type_id, $activityType);
+    $messageTemplateId = self::getMessageTemplateForRenewalReminder($reminder_type, $activityObj->membership_type_id, $activityType, $isJoiner, $isAutoRenew, $settingsArray);
 
     // Skip, if no action is needed for the membership type
     // based on settings
@@ -385,7 +406,7 @@ VALUES ({$batchId}, {$activityId}, {$reminder_type})
     }
 
     // Get activity type id for activity type name
-    $activityTypeID = CRM_Membershiprenewal_BAO_Batch::getActivityTypeIDForName($activityType);
+    $activityTypeID = self::getActivityTypeIDForName($activityType);
 
     // Get logged in user's Contact ID
     $userContactId = CRM_Membershiprenewal_Utils::getLoggedInUserContactID();
@@ -410,11 +431,11 @@ VALUES ({$batchId}, {$activityId}, {$reminder_type})
     if ($activityResult['id']) {
       // Update activity custom data and save membership id
       // as passing 'custom_' is not working in version 4.6
-      self::insertCustomDataForActivity($activityResult['id'], $activityObj->membership_id, $activityObj->end_date);
+      self::insertCustomDataForActivity($activityResult['id'], $activityObj->membership_id, $activityObj->end_date, $activityObj->communication_type);
 
       // Prepare html using message template, to save in activity details section
       // This is for sending scheduled reminders
-      self::updateActivityWithMessageTemplate($activityResult['id'], $activityType, $reminder_type, $activityObj->membership_type_id);
+      self::updateActivityWithMessageTemplate($activityResult['id'], $activityType, $reminder_type, $activityObj->membership_type_id, $isJoiner, $isAutoRenew, $settingsArray);
     }
 
     return $activityResult['id'];
@@ -460,207 +481,42 @@ start_date, end_date, renewal_date, communication_type, reason, status FROM {$te
   }
 
   /**
-   * Function get create activites for new joiners & renewals for selected month/year
+   * Function get create activites for renewals and new joiners for selected month/year
    * 
-   * @params int $month 
-   * @params int $year
+   * @params array $ids 
    *
    * @return boolean $status
    */
-  public static function createActivities($month, $year) {
-
-    if (empty($month) || empty($year)) {
-      return;
-    }
-
-    $result = array(
-      'activities' => array(),
-      'excluded' => array(),
-    );
-
+    public static function createActivities(CRM_Queue_TaskContext $ctx, $ids) {
     // Get membership renewal settings
-    $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+    $settings = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
 
-    // Check if new joiners need to be included in the list
-    if (isset($settingsArray['include_joiner']) && $settingsArray['include_joiner'] == 1) {
-      // Get new joiners list
-      self::createActivitiesForRenewalsNewJoiners($month, $year, $result);
-    }
-
-    self::createActivitiesForRenewals($month, $year, $result);
-
-    return $result;
-  }
-
-  /**
-   * Function get create activites for new joiners for selected month/year
-   * 
-   * @params int $month 
-   * @params int $year
-   *
-   * @return boolean $status
-   */
-  public static function createActivitiesForRenewalsNewJoiners($month, $year, &$result) {
-
-    // Get membership renewal settings
-    $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
-
-    // Renewal dates rable
-    $tableName = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_TABLE_NAME;
-    
-    $firstDate = date("Y-m-d", mktime(0, 0, 0, $month, 1, $year));
-    $lastDate = date("Y-m-t", strtotime($firstDate));
-    $currentDate = date("Y-m-d");
-    $noOfdays = $settingsArray['renewal_first_reminder'];
-
+    // Renewal details table
     $tempTableName = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_BATCH_TEMP_TABLE;
-    $commType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_NEW_JOINER;
+
+    $renewalIds = implode(',', $ids);
 
     // Get all the membership up for renewals
     $selectSql = "
-SELECT renewal.id, renewal.membership_id, member.contact_id, member.membership_type_id, email.email, address.street_address, address.postal_code, contact.do_not_email, contact.do_not_mail, contact.is_opt_out,
-contact.display_name, contact.id as contact_id, member.start_date, member.end_date, member.join_date,
-renewal.communication_type
-FROM {$tempTableName} renewal
-INNER JOIN civicrm_membership member ON renewal.membership_id = member.id 
-LEFT JOIN civicrm_contact contact ON member.contact_id = contact.id
-LEFT JOIN civicrm_email email ON member.contact_id = email.contact_id AND email.on_hold = 0 AND email.is_primary = 1
-LEFT JOIN civicrm_address address ON member.contact_id = address.contact_id AND address.is_primary = 1
-WHERE renewal.status = 1 AND renewal.communication_type = %1
-";
-//AND DATE_SUB(renewal.end_date, INTERVAL {$noOfdays} DAY) <= %3
-    $selectParams = array(
-      '1' => array($commType, 'String'),
-    );
-    /*$selectParams = array(
-      '1' => array($firstDate, 'String'),
-      '2' => array($lastDate, 'String'),
-    );*/
-    $selectDao = CRM_Core_DAO::executeQuery($selectSql, $selectParams);
-
-    // Get logged in user's Contact ID
-    $userContactId = CRM_Membershiprenewal_Utils::getLoggedInUserContactID();
-
-    while($selectDao->fetch()) {
-
-      // Get activity type name by checking email, address and communication preference      
-      $activityType = CRM_Membershiprenewal_BAO_Batch::getActivityTypeID($selectDao);
-
-      // Get message templates for reminder and membership type
-      $messageTemplateId = self::getMessageTemplateForRenewalReminder(1, $selectDao->membership_type_id, $activityType, $isJoiner = TRUE, $isAutoRenew = FALSE);
-
-      // Skip, if no action is needed for the membership type
-      // based on settings
-      /*if (empty($messageTemplateId) && $activityType != CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_UNKNOWN_ACTIVITY_TYPE_NAME) {
-        $result['excluded'][] = $selectDao->membership_id;
-        continue;
-      }*/
-
-      // Get activity type id for activity type name
-      $activityTypeID = CRM_Membershiprenewal_BAO_Batch::getActivityTypeIDForName($activityType);
-
-      // Get activity date
-      $activityDate = CRM_Membershiprenewal_BAO_Membershiprenewal::getScheduledDateForFirstReminder($selectDao->end_date, $settingsArray);
-
-      // Prepare activity params
-      $activityParams = array(
-        'activity_type_id' => $activityTypeID,
-        'subject' => 'Membership - New Joiners',
-        'activity_date_time' => $activityDate,
-        'details' => '',
-        'status_id' => CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_SCHEDULED_ACTIVITY_STATUS_ID, // Scheduled status
-        'source_contact_id' => $userContactId,
-        'target_contact_id' => $selectDao->contact_id,
-        'is_test' => 0,
-      );
-      
-      // Create activity using API
-      $activityResult = CRM_Membershiprenewal_Utils::CiviCRMAPIWrapper('Activity', 'create', $activityParams);
-
-      $result['activities'][] = $activityResult['id'];
-
-      if ($activityResult['id']) {
-        // Update activity custom data and save membership id
-        // as passing 'custom_' is not working in version 4.6
-        self::insertCustomDataForActivity($activityResult['id'], $selectDao->membership_id, $selectDao->end_date, $selectDao->communication_type);
-
-        // Prepare html using message template, to save in activity details section
-        // This is for sending scheduled reminders or print letters
-        // 1 - this is first renewal reminder
-        self::updateActivityWithMessageTemplate($activityResult['id'], $activityType, 1, $selectDao->membership_type_id, $isJoiner = TRUE, $isAutoRenew = FALSE);
-
-        // Update activity_id in temp table
-        $updateTempSql = "UPDATE {$tempTableName} SET activity_id = %1 WHERE id = %2";
-        $updateTempParams = array(
-          '1' => array($activityResult['id'], 'Integer'),
-          '2' => array($selectDao->id, 'Integer'),
-        );
-        CRM_Core_DAO::executeQuery($updateTempSql, $updateTempParams);
-      }
-    }
-
-    //return array($activityIds, $excludedMembershipIds);
-  }
-
-  /**
-   * Function get create activites for renewals for selected month/year
-   * 
-   * @params int $month 
-   * @params int $year
-   *
-   * @return boolean $status
-   */
-  public static function createActivitiesForRenewals($month, $year, &$result) {
-
-    if (empty($month) || empty($year)) {
-      return;
-    }
-
-    // Get membership renewal settings
-    $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
-
-    $activityIds = $excludedMembershipIds = array();
-
-    $tableName = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_TABLE_NAME;
-    
-    $firstDate = date("Y-m-d", mktime(0, 0, 0, $month, 1, $year));
-    $lastDate = date("Y-m-t", strtotime($firstDate));
-    $currentDate = date("Y-m-d");
-    $noOfdays = $settingsArray['renewal_first_reminder'];
-
-    $tempTableName = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_BATCH_TEMP_TABLE;
-    $commType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_RENEWAL;
-
-    // Get all the membership up for renewals
-    /*$selectSql = "
-SELECT renewal.membership_id, renewal.renewal_date, renewal.end_date, renewal.contact_id, member.membership_type_id, email.email, address.street_address, address.postal_code, contact.do_not_email, contact.do_not_mail, contact.is_opt_out
-FROM {$tableName} renewal
-INNER JOIN civicrm_membership member ON renewal.membership_id = member.id 
-LEFT JOIN civicrm_contact contact ON renewal.contact_id = contact.id
-LEFT JOIN civicrm_email email ON renewal.contact_id = email.contact_id AND email.on_hold = 0 AND email.is_primary = 1
-LEFT JOIN civicrm_address address ON renewal.contact_id = address.contact_id AND address.is_primary = 1
-WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
-";*/
-    $selectSql = "
-SELECT renewal.id, renewal.membership_id, member.contact_id, member.membership_type_id, email.email, address.street_address, address.postal_code, contact.do_not_email, contact.do_not_mail, contact.is_opt_out,
-contact.display_name, contact.id as contact_id, member.start_date, member.end_date, member.join_date,
-renewal.communication_type, member.contribution_recur_id, recur.payment_instrument_id
+SELECT renewal.id, renewal.membership_id, renewal.communication_type, 
+member.contact_id, member.membership_type_id, member.start_date, 
+member.end_date, member.join_date, member.contribution_recur_id,
+email.email, address.street_address, address.supplemental_address_1, 
+address.supplemental_address_2, address.supplemental_address_3, 
+address.city, address.postal_code, contact.do_not_email, 
+contact.do_not_mail, contact.is_opt_out, contact.display_name, 
+contact.id as contact_id, recur.payment_instrument_id
 FROM {$tempTableName} renewal
 INNER JOIN civicrm_membership member ON renewal.membership_id = member.id 
 LEFT JOIN civicrm_contribution_recur recur ON member.contribution_recur_id = recur.id
 LEFT JOIN civicrm_contact contact ON member.contact_id = contact.id
 LEFT JOIN civicrm_email email ON member.contact_id = email.contact_id AND email.on_hold = 0 AND email.is_primary = 1
 LEFT JOIN civicrm_address address ON member.contact_id = address.contact_id AND address.is_primary = 1
-WHERE renewal.status = 1 AND renewal.communication_type = %1
+WHERE renewal.status = 1 AND renewal.id IN ($renewalIds)
 ";
     $selectParams = array(
-      '1' => array($commType, 'String'),
+      '1' => array('New Joiners', 'String'),
     );
-
-    /*$selectParams = array(
-      '1' => array($firstDate, 'String'),
-      '2' => array($lastDate, 'String'),
-    );*/
     $selectDao = CRM_Core_DAO::executeQuery($selectSql, $selectParams);
 
     // Get logged in user's Contact ID
@@ -668,39 +524,36 @@ WHERE renewal.status = 1 AND renewal.communication_type = %1
 
     while($selectDao->fetch()) {
 
-      // Get activity type name by checking email, address and communication preference
-      $activityType = CRM_Membershiprenewal_BAO_Batch::getActivityTypeID($selectDao);
+      CRM_Core_Error::debug_log_message("Processing communication for Membership ID {$selectDao->membership_id}");
 
-      // Check if the membership is set for auto-renew
-      // using the payment method in the related recurring record
-      $isAutoRenew = FALSE;
-      if (!empty($selectDao->payment_instrument_id) && 
-        in_array($selectDao->payment_instrument_id, $settingsArray['autorenew_payment_instrument_id'])) {
-        $isAutoRenew = TRUE;
+      $isJoiner = FALSE;
+      if ($selectDao->communication_type == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_NEW_JOINER) {
+        $isJoiner = TRUE;
       }
 
+      $isAutoRenew = FALSE;
+      // Check if the membership is set for auto-renew (only for renewals)
+      // using the payment method in the related recurring record
+      if ($isJoiner == FALSE) {
+        $isAutoRenew = self::checkIfRecurringIsAutoRenew($selectDao, $settings);
+      }
+
+      // Get activity type name by checking email, address and communication preference      
+      $activityType = self::getActivityTypeID($selectDao);
+
       // Get message templates for reminder and membership type
-      $messageTemplateId = self::getMessageTemplateForRenewalReminder(1, $selectDao->membership_type_id, $activityType, $isJoiner = FALSE, $isAutoRenew);
-
-      //CRM_Core_Error::debug_var('Debug-String', "CONTACT: {$selectDao->display_name}, ACT TYPE: {$activityType}, MSG TEMPLATE: {$messageTemplateId}, AUTORENEW: {$isAutoRenew}");
-
-      // Skip, if no action is needed for the membership type
-      // based on settings
-      /*if (empty($messageTemplateId) && $activityType != CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_UNKNOWN_ACTIVITY_TYPE_NAME) {
-        $result['excluded'][] = $selectDao->membership_id;
-        continue;
-      }*/
+      $messageTemplateId = self::getMessageTemplateForRenewalReminder(1, $selectDao->membership_type_id, $activityType, $isJoiner, $isAutoRenew, $settings);
 
       // Get activity type id for activity type name
-      $activityTypeID = CRM_Membershiprenewal_BAO_Batch::getActivityTypeIDForName($activityType);
+      $activityTypeID = self::getActivityTypeIDForName($activityType);
 
       // Get activity date
-      $activityDate = CRM_Membershiprenewal_BAO_Membershiprenewal::getScheduledDateForFirstReminder($selectDao->end_date, $settingsArray);
+      $activityDate = CRM_Membershiprenewal_BAO_Membershiprenewal::getScheduledDateForFirstReminder($selectDao->end_date, $settings, TRUE);
 
       // Prepare activity params
       $activityParams = array(
         'activity_type_id' => $activityTypeID,
-        'subject' => 'Membership Renewal',
+        'subject' => 'Membership - '.$selectDao->communication_type,
         'activity_date_time' => $activityDate,
         'details' => '',
         'status_id' => CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_SCHEDULED_ACTIVITY_STATUS_ID, // Scheduled status
@@ -712,6 +565,10 @@ WHERE renewal.status = 1 AND renewal.communication_type = %1
       // Create activity using API
       $activityResult = CRM_Membershiprenewal_Utils::CiviCRMAPIWrapper('Activity', 'create', $activityParams);
 
+      CRM_Core_Error::debug_log_message("Communication activity created for Membership ID {$selectDao->membership_id}");
+
+      CRM_Core_Error::debug_var('activityResult', $activityResult);
+
       $result['activities'][] = $activityResult['id'];
 
       if ($activityResult['id']) {
@@ -719,10 +576,14 @@ WHERE renewal.status = 1 AND renewal.communication_type = %1
         // as passing 'custom_' is not working in version 4.6
         self::insertCustomDataForActivity($activityResult['id'], $selectDao->membership_id, $selectDao->end_date, $selectDao->communication_type);
 
+        CRM_Core_Error::debug_log_message("Activity custom data saved for Membership ID {$selectDao->membership_id}");
+
         // Prepare html using message template, to save in activity details section
         // This is for sending scheduled reminders or print letters
         // 1 - this is first renewal reminder
-        self::updateActivityWithMessageTemplate($activityResult['id'], $activityType, 1, $selectDao->membership_type_id, $isJoiner = FALSE, $isAutoRenew);
+        self::updateActivityWithMessageTemplate($activityResult['id'], $activityType, 1, $selectDao->membership_type_id, $isJoiner, $isAutoRenew, $settings);
+
+        CRM_Core_Error::debug_log_message("Activity details & attachment updated for Membership ID {$selectDao->membership_id}");
 
         // Update activity_id in temp table
         $updateTempSql = "UPDATE {$tempTableName} SET activity_id = %1 WHERE id = %2";
@@ -734,30 +595,89 @@ WHERE renewal.status = 1 AND renewal.communication_type = %1
       }
     }
 
-    //return array($activityIds, $excludedMembershipIds);
+    return CRM_Queue_Task::TASK_SUCCESS;
+  }
+
+  public static function attachLetterTemplate($renewalReminder = 1, $activityId, $memTypeId, $isJoiner, $isAutoRenew) {
+    // Get message template id for reminder and membership type
+    $activityType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME;
+    $messageTemplateId = self::getMessageTemplateForRenewalReminder($renewalReminder, $memTypeId, $activityType, $isJoiner, $isAutoRenew);
+
+    // Get message template content
+    $msgTemplate = CRM_Membershiprenewal_BAO_Membershiprenewal::composeHTMLForActivity($activityId, $messageTemplateId);
+
+    $html = $msgTemplate['msg_html'];
+    $subject = $msgTemplate['msg_subject'];
+    $subject = str_replace(' ', '-', $subject);
+    $config = CRM_Core_Config::singleton( );
+    $csv_path = $config->customFileUploadDir;
+
+    require_once 'CRM/Core/Smarty/resources/String.php';
+    civicrm_smarty_register_string_resource();
+    $smarty = CRM_Core_Smarty::singleton();
+    $html = $smarty->fetch("string:{$html}");
+
+    $fileName = "{$subject}-{$activityId}.pdf";
+    $filePathName = "{$csv_path}{$fileName}";
+    require_once 'CRM/Utils/PDF/Utils.php';
+    $pdfContent = CRM_Utils_PDF_Utils::html2pdf($html , $fileName , true , CRM_Core_DAO::$_nullArray );
+
+    $handle = fopen($filePathName, 'w');
+    file_put_contents($filePathName, $pdfContent);
+    fclose($handle);
+
+    $mimeType = 'application/pdf';
+    $upload_date = date('Y-m-d H:i:s');
+
+    require_once 'CRM/Core/DAO/File.php';
+    $fileDao = new CRM_Core_DAO_File();
+    $fileDao->mime_type = $mimeType;
+    $fileDao->uri = $fileName;
+    $fileDao->upload_date = $upload_date;
+    $fileDao->save();
+    $fileId = $fileDao->id;
+
+    require_once 'CRM/Core/DAO/EntityFile.php';
+    $efileDao = new CRM_Core_DAO_EntityFile();
+    $efileDao->entity_id = $activityId;
+    $efileDao->entity_table = 'civicrm_activity';
+    $efileDao->file_id = $fileId;
+    $efileDao->save();
+
+    $entityFileId = $efileDao->id;
   }
 
   /**
    * Function to check if the membership is set for auto-renew
    * using the payment method in the related recurring record
    * 
-   * @params int $month 
-   * @params int $year
+   * @params obj $recurObj 
    *
    * @return boolean $status
    */
-  public static function checkIfMembershipIsAutoRenew($recurId) {
+  public static function checkIfRecurringIsAutoRenew($recurObj, $settings = array()) {
 
-    if (empty($recurId)) {
-      return FALSE;
+    $isAutoRenew = FALSE;
+
+    if (empty($recurObj->payment_instrument_id)) {
+      return $isAutoRenew;
     }
 
-    $recurParams = array(
-      'id' => $activityId,
-      'sequential' => 1,
-    );
-    $recurDetails = CRM_Membershiprenewal_Utils::CiviCRMAPIWrapper('ContributionRecur', 'get', $recurParams);
+    // Check only if recurring is of Pending or In Progress status
+    if (!in_array($recurObj->contribution_status_id, array(2, 5))) {
+      return $isAutoRenew;
+    }
 
+    // Get membership renewal settings
+    if (empty($settings)) {
+      $settings = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+    }
+
+    if (in_array($recurObj->payment_instrument_id, $settings['autorenew_payment_instrument_id'])) {
+      $isAutoRenew = TRUE;
+    }
+
+    return $isAutoRenew;
   }
 
   public static function prepareTempTable($month, $year) {
@@ -800,15 +720,38 @@ WHERE renewal.status = 1 AND renewal.communication_type = %1
     // Check if new joiners need to be included in the list
     if (isset($settingsArray['include_joiner']) && $settingsArray['include_joiner'] == 1) {
 
+      // Get all membership types which has welcome letter settings
+      $allNewJoinersMemTypes = CRM_Membershiprenewal_Utils::getAllMembershipTypesSetForRenewal(TRUE);
+
+      // Get all membership types which are not set for renewal
+      $memTypesNotNewJoiners = array_diff($allMemTypes, $allNewJoinersMemTypes);
+
+      $extraNewJoinerExclude = $extraNewJoinerInclude = '';
+      if (!empty($memTypesNotNewJoiners)) {
+        $memTypesIdsNotForNewJoiners = @implode(',', $memTypesNotNewJoiners);
+        $extraNewJoinerExclude = " AND membership_type_id NOT IN ({$memTypesIdsNotForNewJoiners})";
+        $extraNewJoinerInclude = " AND membership_type_id IN ({$memTypesIdsNotForNewJoiners})";
+      }
+
+      //Include only the memberships of statuses considered as current
+      $curMemStatuses = CRM_Membershiprenewal_Utils::getAllCurrentMembershipStatuses();
+      $curMemStatusesStr = implode(',', $curMemStatuses);
+
       // New joiners - To be included in the batch
       $sql = "
 INSERT INTO {$tempTableName} (membership_id, membership_type_id, contact_id, join_date,
 start_date, end_date, reason, communication_type, status)
 SELECT id, membership_type_id, contact_id, join_date, start_date, end_date, NULL, '{$commTypeNew}', 1
-FROM civicrm_membership WHERE join_date > %1 AND id NOT IN 
-(SELECT membership_id FROM civicrm_value_membership_renewal_information){$extraExclude}";
+FROM civicrm_membership WHERE join_date > %1 
+AND status_id IN ({$curMemStatusesStr})
+{$extraNewJoinerExclude}";
+// AND join_date >= %2 AND join_date <= %3
+// AND id NOT IN
+// (SELECT membership_id FROM civicrm_value_membership_renewal_information)
       $params = array(
         '1' => array($settingsArray['cut_off_date'], 'String' ),
+        '2' => array($firstDate, 'String' ),
+        '3' => array($lastDate, 'String' ),
       );
       //echo $settingsArray['cut_off_date'];
       //echo $sql;exit;
@@ -819,7 +762,9 @@ FROM civicrm_membership WHERE join_date > %1 AND id NOT IN
 INSERT INTO {$tempTableName} (membership_id, membership_type_id, contact_id, join_date,
 start_date, end_date, reason, communication_type, status)
 SELECT id, membership_type_id, contact_id, join_date, start_date, end_date, '{$noActionmessage}', '{$commTypeNew}', 0
-FROM civicrm_membership WHERE join_date > %1 {$extraInclude}
+FROM civicrm_membership WHERE join_date > %1
+AND status_id IN ({$curMemStatusesStr})
+{$extraNewJoinerInclude}
 ";
       CRM_Core_DAO::executeQuery($sql, $params);
     }
@@ -829,8 +774,7 @@ INSERT INTO {$tempTableName} (membership_id, membership_type_id, contact_id, joi
 start_date, end_date, renewal_date, communication_type, status)
 SELECT membership_id, membership_type_id, contact_id, join_date, start_date, 
 end_date, renewal_date, '{$commTypeRenewal}', 1
-FROM {$renewalTableName} WHERE 
-(join_date < %1 OR join_date > %2) AND
+FROM {$renewalTableName} WHERE renewal_date >= %1 AND renewal_date <= %2 AND
 renewal_date IS NOT NULL AND renewal_date != ''
     ";
     $params = array(
@@ -848,7 +792,7 @@ renewal_date IS NOT NULL AND renewal_date != ''
     CRM_Core_DAO::executeQuery($sql, $params);*/
 
     // Renewals - Not in date table
-    $sql = "UPDATE {$tempTableName} SET reason = '{$notInRange}', status = 0 WHERE renewal_date < %1 OR renewal_date > %2";
+    $sql = "UPDATE {$tempTableName} SET reason = '{$notInRange}', status = 0 WHERE (renewal_date < %1 OR renewal_date > %2) AND communication_type = 'Renewal'";
     $params = array(
       '1' => array($firstDate, 'String' ),
       '2' => array($lastDate, 'String' ),
@@ -857,9 +801,31 @@ renewal_date IS NOT NULL AND renewal_date != ''
 
     // Renewals - No Action is set for the membership type in renewal settings
     if (!empty($memTypesNotForRenewal)) {
-      $sql = "UPDATE {$tempTableName} SET reason = '{$noActionmessage}', status = 0 WHERE reason IS NULL {$extraInclude}";
+      $sql = "UPDATE {$tempTableName} SET reason = '{$noActionmessage}', status = 0 WHERE reason IS NULL AND communication_type = 'Renewal' {$extraInclude}";
       CRM_Core_DAO::executeQuery($sql);
     }
+
+    $sql = "DELETE FROM {$tempTableName} WHERE communication_type = 'Renewal' AND contact_id NOT IN (SELECT contact_id FROM civicrm_group_contact where group_id = 20)";
+    CRM_Core_DAO::executeQuery($sql);
+    $sql = "DELETE FROM {$tempTableName} WHERE contact_id IN (8266, 8519)";
+    CRM_Core_DAO::executeQuery($sql);    
+
+    //MV Temp fix to run renewal more than once in month
+    $sql = "DELETE FROM {$tempTableName} WHERE communication_type = 'Renewal' AND contact_id IN (
+      SELECT c.contact_id FROM `civicrm_membership_renewal_entity_batch` a 
+      INNER JOIN civicrm_activity b ON (a.activity_id = b.id)
+      INNER JOIN civicrm_activity_contact c ON (c.activity_id = a.id)
+      WHERE c.record_type_id = 3
+    )";
+    CRM_Core_DAO::executeQuery($sql);
+    
+    //Dont renew who does have -1 membership_fee (who doesn't match combination in joining matrix)
+    $sql = "DELETE FROM {$tempTableName} WHERE communication_type = 'Renewal' AND contact_id IN (
+      SELECT b.contact_id FROM `civicrm_value_renewal_information` a 
+      INNER JOIN civicrm_membership b ON (a.entity_id = b.id) 
+      WHERE a.renewal_fee < 0
+    )";
+    CRM_Core_DAO::executeQuery($sql);    
 
     return TRUE;
 
@@ -900,50 +866,82 @@ renewal_date IS NOT NULL AND renewal_date != ''
     // Check if new joiners need to be included in the list
     if (isset($settingsArray['include_joiner']) && $settingsArray['include_joiner'] == 1) {
       // Get new joiners list
-      self::getactivitiesSummaryForNewJoiners($month, $year, $result);
+      self::getactivitiesSummaryForNewJoinersOrRenewal($month, $year, $result, TRUE);
     }
 
-    self::getactivitiesSummaryForRenewals($month, $year, $result);
+    self::getactivitiesSummaryForNewJoinersOrRenewal($month, $year, $result, FALSE);
 
     return $result;
   }
 
   /**
-   * Function get summary for new joiners, to display before the activities are created
+   * Function get summary for new joiners or renewals, to display before the activities are created
    * 
    * @params int $month 
    * @params int $year
    *
    * @return array $result
    */
-  public static function getactivitiesSummaryForNewJoiners($month, $year, &$result) {
+  public static function getactivitiesSummaryForNewJoinersOrRenewal($month, $year, &$result, $isJoiner = FALSE) {
     
     $firstDate = date("Y-m-d", mktime(0, 0, 0, $month, 1, $year));
     $lastDate = date("Y-m-t", strtotime($firstDate));
 
     $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
 
-    // Get all the membership up for renewals
-    $selectSql = "
-SELECT member.id as membership_id, member.contact_id, member.membership_type_id, email.email, 
-address.street_address, address.postal_code, contact.do_not_email, contact.do_not_mail, 
-contact.is_opt_out, contact.sort_name, contact.is_deceased,contact.display_name, 
-contact.id as contact_id, member.start_date, member.end_date, member.join_date, 
-'New Joiner' as communication_type,
+    // Get all the membership up for new joiners
+    if ($isJoiner) {
+      $selectSql = "
+SELECT renewal.membership_id, renewal.contact_id, renewal.membership_type_id, email.email,
+address.street_address, address.supplemental_address_1, 
+address.supplemental_address_2, address.supplemental_address_3, 
+address.city, address.postal_code,
+contact.do_not_email, contact.do_not_mail, 
+contact.is_opt_out, contact.sort_name, contact.is_deceased,contact.display_name,
+renewal.start_date, renewal.end_date, renewal.join_date, renewal.renewal_date, renewal.communication_type,  
 phone.phone, contact.do_not_sms, phone.id as phone_id, phone.phone_type_id
-FROM civicrm_membership member
+FROM civicrm_membership_renewal_details renewal
+INNER JOIN civicrm_membership member ON renewal.membership_id = member.id 
 LEFT JOIN civicrm_contact contact ON member.contact_id = contact.id
 LEFT JOIN civicrm_email email ON member.contact_id = email.contact_id AND email.on_hold = 0 AND email.is_primary = 1
 LEFT JOIN civicrm_phone phone ON member.contact_id = phone.contact_id AND phone.phone_type_id = 2
 LEFT JOIN civicrm_address address ON member.contact_id = address.contact_id AND address.is_primary = 1
-WHERE member.join_date >= %1 AND member.join_date <= %2 AND member.join_date > %3
+WHERE renewal.status = 1 AND renewal.communication_type = 'New Joiner'
+AND member.join_date > %3
 ";
-//echo $sql;exit;
-    $selectParams = array(
-      '1' => array($firstDate, 'String' ),
-      '2' => array($lastDate, 'String' ),
-      '3' => array($settingsArray['cut_off_date'], 'String' ),
-    );
+//AND member.join_date >= %1 AND member.join_date <= %2
+      $selectParams = array(
+        '1' => array($firstDate, 'String' ),
+        '2' => array($lastDate, 'String' ),
+        '3' => array($settingsArray['cut_off_date'], 'String' ),
+      );
+    } else {
+      // Get all the memberships up for renewals
+      $selectSql = "
+SELECT renewal.membership_id, renewal.contact_id, renewal.membership_type_id, email.email,
+address.street_address, address.supplemental_address_1, 
+address.supplemental_address_2, address.supplemental_address_3, 
+address.city, address.postal_code,
+contact.do_not_email, contact.do_not_mail, 
+contact.is_opt_out, contact.sort_name, contact.is_deceased,contact.display_name,
+renewal.start_date, renewal.end_date, renewal.join_date, renewal.renewal_date, renewal.communication_type,  
+phone.phone, contact.do_not_sms, phone.id as phone_id, phone.phone_type_id
+FROM civicrm_membership_renewal_details renewal
+INNER JOIN civicrm_membership member ON renewal.membership_id = member.id 
+LEFT JOIN civicrm_contact contact ON member.contact_id = contact.id
+LEFT JOIN civicrm_email email ON member.contact_id = email.contact_id AND email.on_hold = 0 AND email.is_primary = 1
+LEFT JOIN civicrm_phone phone ON member.contact_id = phone.contact_id AND phone.phone_type_id = 2
+LEFT JOIN civicrm_address address ON member.contact_id = address.contact_id AND address.is_primary = 1
+WHERE renewal.status = 1 AND renewal.communication_type = 'Renewal'
+AND renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
+GROUP BY renewal.membership_id
+";
+      $selectParams = array(
+        '1' => array($firstDate, 'String' ),
+        '2' => array($lastDate, 'String' ),
+      );
+    }
+
     $selectDao = CRM_Core_DAO::executeQuery($selectSql, $selectParams);
 
     // All membership types
@@ -957,10 +955,22 @@ WHERE member.join_date >= %1 AND member.join_date <= %2 AND member.join_date > %
       $dataArray['membership_type'] = $memTypes[$dataArray['membership_type_id']];
 
       // Get activity type name by checking email, address and communication preference      
-      $activityType = CRM_Membershiprenewal_BAO_Batch::getActivityTypeID($selectDao);
+      $activityType = self::getActivityTypeID($selectDao);
+
+      $isAutoRenew = FALSE;
+
+      // Check if the membership is set for auto-renew
+      // using the payment method in the related recurring record
+      if ($isJoiner == FALSE) {
+        if (!empty($selectDao->payment_instrument_id) && 
+          in_array($selectDao->payment_instrument_id, $settingsArray['autorenew_payment_instrument_id'])) {
+          $isAutoRenew = TRUE;
+          $dataArray['communication_type'] = 'Auto-Renewal';
+        }
+      }
       
       // Get message templates for reminder and membership type
-      $messageTemplateId = self::getMessageTemplateForRenewalReminder(1, $selectDao->membership_type_id, $activityType, $isJoiner = TRUE, $isAutoRenew = FALSE);
+      $messageTemplateId = self::getMessageTemplateForRenewalReminder(1, $selectDao->membership_type_id, $activityType, $isJoiner, $isAutoRenew);
 
       // Skip, if no action is needed for the membership type
       // based on settings
@@ -970,163 +980,22 @@ WHERE member.join_date >= %1 AND member.join_date <= %2 AND member.join_date > %
         continue;
       }
 
-      ## Decide activity types based in the below conditions
-      // Check if valid email is available
-      // 1. Email is not empty
-      // 2. Email is not on hold (checking this in query)
-      // 3. Contact does not have DO NOT EMAIL flag ticked
-      // 4. Contact did not OPT OUT of all mailings
-      if (!empty($selectDao->email) && $selectDao->do_not_email == 0) {
-        $emailActivitiesCount ++;
-        $result['email_activities'][] = $dataArray;
-      }
-      // Check if we have a valid address
-      // 1. Street address and Postcode are not empty
-      // 2. Contact does not have DO NOT MAIL flag ticked
-      else if (!empty($selectDao->street_address) && 
-        !empty($selectDao->postal_code) 
-        && $selectDao->do_not_mail == 0) {
-        $letterAcivitiesCount++;
-        $result['letter_activities'][] = $dataArray;
-      } 
-      // If none of the above 
-      // Create the activity type as Unknown
-      else {
-        $unknownActivitiesCount++;
-        $result['unknown_activities'][] = $dataArray;
-      }
+      // Get count and activities sumamry based on activity type
+      switch ($activityType) {
+        case CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_EMAIL_ACTIVITY_TYPE_NAME:
+          $emailActivitiesCount ++;
+          $result['email_activities'][] = $dataArray;
+          break;
 
-      // Get Phone details
-      if (!empty($selectDao->phone)) {
-        $smsCount++;
-
-        // Add phone details to result array to send SMS
-        $result['formatted_contacts'][] = array(
-          'contact_id' => $selectDao->contact_id,
-          'sort_name' => $selectDao->sort_name,
-          'display_name' => $selectDao->display_name,
-          'do_not_sms' => $selectDao->do_not_sms,
-          'is_deceased' => $selectDao->is_deceased,
-          'phone_id' => $selectDao->phone_id,
-          'phone_type_id' => $selectDao->phone_type_id,
-          'phone' => $selectDao->phone,
-        );
-
-        $result['sms_contacts'][] = $selectDao->contact_id;
-        $result['sms_details'][] = $selectDao->contact_id.'::'.$selectDao->phone;
-      }
-    }
-
-    $totalCount = $emailActivitiesCount + $letterAcivitiesCount + $unknownActivitiesCount;
-
-    $result['total_count'] += $totalCount;
-    $result['email_count'] += $emailActivitiesCount;
-    $result['letter_count'] += $letterAcivitiesCount;
-    $result['unknown_count'] += $unknownActivitiesCount;
-    $result['excluded_count'] += $excludedCount;
-    $result['sms_count'] += $smsCount;
-  }
-
-  /**
-   * Function get renewal summary, to display before the activities are created
-   * 
-   * @params int $month 
-   * @params int $year
-   *
-   * @return array $result
-   */
-  public static function getactivitiesSummaryForRenewals($month, $year, &$result) {
-
-    // Renewal dates table
-    $tableName = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_TABLE_NAME;
-    
-    $firstDate = date("Y-m-d", mktime(0, 0, 0, $month, 1, $year));
-    $lastDate = date("Y-m-t", strtotime($firstDate));
-
-    // Get all the membership up for renewals
-    $selectSql = "
-SELECT renewal.membership_id, renewal.renewal_date, renewal.contact_id, member.membership_type_id, 
-email.email, address.street_address, address.postal_code, contact.do_not_email, contact.do_not_mail,
-contact.is_opt_out, contact.sort_name, contact.is_deceased, contact.display_name, 
-contact.id as contact_id, member.start_date, member.end_date, member.join_date,
-'Renewal' as communication_type, member.contribution_recur_id, recur.payment_instrument_id,
-phone.phone, contact.do_not_sms, phone.id as phone_id, phone.phone_type_id
-FROM {$tableName} renewal
-INNER JOIN civicrm_membership member ON renewal.membership_id = member.id 
-LEFT JOIN civicrm_contribution_recur recur ON member.contribution_recur_id = recur.id
-LEFT JOIN civicrm_contact contact ON renewal.contact_id = contact.id
-LEFT JOIN civicrm_email email ON renewal.contact_id = email.contact_id AND email.on_hold = 0 AND email.is_primary = 1
-LEFT JOIN civicrm_phone phone ON member.contact_id = phone.contact_id AND phone.phone_type_id = 2
-LEFT JOIN civicrm_address address ON renewal.contact_id = address.contact_id AND address.is_primary = 1
-WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
-";
-    $selectParams = array(
-      '1' => array($firstDate, 'String' ),
-      '2' => array($lastDate, 'String' ),
-    );
-    $selectDao = CRM_Core_DAO::executeQuery($selectSql, $selectParams);
-
-    // Get membership renewal settings
-    $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
-
-    // All membership types
-    $memTypes = CRM_Membershiprenewal_Utils::getAllMembershipTypes();
-
-    $emailActivitiesCount = $letterAcivitiesCount = $unknownActivitiesCount = $excludedCount = 0;
-    $smsCount = 0;
-    //$excludedMembershipIds = $emailActivities = $letterAcivities = $unknownActivities = array();
-    while($selectDao->fetch()) {
-
-      $dataArray = $selectDao->toArray();
-      $dataArray['membership_type'] = $memTypes[$dataArray['membership_type_id']];
-
-      // Get activity type name by checking email, address and communication preference      
-      $activityType = CRM_Membershiprenewal_BAO_Batch::getActivityTypeID($selectDao);
-
-      // Check if the membership is set for auto-renew
-      // using the payment method in the related recurring record
-      $isAutoRenew = FALSE;
-      if (!empty($selectDao->payment_instrument_id) && 
-        in_array($selectDao->payment_instrument_id, $settingsArray['autorenew_payment_instrument_id'])) {
-        $isAutoRenew = TRUE;
-        $dataArray['communication_type'] = 'Auto-Renewal';
-      }
-
-      // Get message templates for reminder and membership type
-      $messageTemplateId = self::getMessageTemplateForRenewalReminder(1, $selectDao->membership_type_id, $activityType, $isJoiner = FALSE, $isAutoRenew);
-
-      // Skip, if no action is needed for the membership type
-      // based on settings
-      if (empty($messageTemplateId) && $activityType != CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_UNKNOWN_ACTIVITY_TYPE_NAME) {
-        $excludedCount++;
-        $excludedMembershipIds[] = $selectDao->membership_id;
-        continue;
-      }
-
-      ## Decide activity types based in the below conditions
-      // Check if valid email is available
-      // 1. Email is not empty
-      // 2. Email is not on hold (checking this in query)
-      // 3. Contact does not have DO NOT EMAIL flag ticked
-      // 4. Contact did not OPT OUT of all mailings
-      if (!empty($selectDao->email) && $selectDao->do_not_email == 0) {
-        $emailActivitiesCount ++;
-        $result['email_activities'][] = $dataArray;
-      }
-      // Check if we have a valid address
-      // 1. Street address and Postcode are not empty
-      // 2. Contact does not have DO NOT MAIL flag ticked
-      else if (!empty($selectDao->street_address) && 
-        !empty($selectDao->postal_code) 
-        && $selectDao->do_not_mail == 0) {
-        $letterAcivitiesCount++;
-        $result['letter_activities'][] = $dataArray;
-      } 
-      // If none of the above 
-      // Create the activity type as Unknown
-      else {
-        $unknownActivitiesCount++;
-        $result['unknown_activities'][] = $dataArray;
+        case CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME:
+          $letterAcivitiesCount++;
+          $result['letter_activities'][] = $dataArray;
+          break;
+          
+        case CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_UNKNOWN_ACTIVITY_TYPE_NAME:
+          $unknownActivitiesCount++;
+          $result['unknown_activities'][] = $dataArray;
+          break;    
       }
 
       // Get Phone details
@@ -1175,23 +1044,32 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
     // 3. Contact does not have DO NOT EMAIL flag ticked
     // 4. Contact did not OPT OUT of all mailings
     if (!empty($activityObj->email) && $activityObj->do_not_email == 0) {
-      $activityType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_EMAIL_ACTIVITY_TYPE_NAME;
+      return CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_EMAIL_ACTIVITY_TYPE_NAME;
     } 
     // Check if we have a valid address
-    // 1. Street address and Postcode are not empty
+    // 1. Any 2 address lines are available
+    // - street_address
+    // - supplemental_address_1
+    // - supplemental_address_2
+    // - supplemental_address_3
+    // - postal_code
     // 2. Contact does not have DO NOT MAIL flag ticked
-    else if (!empty($activityObj->street_address) && 
-      !empty($activityObj->postal_code) 
-      && $activityObj->do_not_mail == 0) {
-      $activityType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME;
-    } 
+    $address = array(
+      $activityObj->street_address,
+      $activityObj->supplemental_address_1,
+      $activityObj->supplemental_address_2,
+      $activityObj->supplemental_address_3,
+      //$activityObj->city,
+      $activityObj->postal_code,
+    );
+    // Remove empty lines from the address array
+    $address = array_filter($address);
+    if (count($address) >= 2 && $activityObj->do_not_mail == 0) {
+      return CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME;
+    }
     // If none of the above 
     // Create the activity type as Unknown
-    else {
-      $activityType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_UNKNOWN_ACTIVITY_TYPE_NAME;
-    }
-
-    return $activityType;
+    return CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_UNKNOWN_ACTIVITY_TYPE_NAME;
   }
 
   /**
@@ -1221,12 +1099,16 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
    */
   public static function insertCustomDataForActivity($activityId, $membershipId, $membershipEndDate, $commType) {
 
-    if (empty($activityId) || empty($membershipId) || empty($membershipEndDate)) {
+    if (empty($activityId) || empty($membershipId)) {
       return;
     }
 
     if (empty($commType)) {
       $commType = 'Renewal';
+    }
+
+    if (empty($membershipEndDate)) {
+      $membershipEndDate = 'NULL';
     }
 
     $columnName = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_ACTIVITIES_MEMBERSHIP_CUSTOM_FIELD_COLUMN_NAME;
@@ -1253,59 +1135,20 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
    *
    * @return int $activityTypeId
    */
-  public static function updateActivityWithMessageTemplate($activityId, $activityType, $renewalReminder = 1, $memTypeId = NULL, $isJoiner = FALSE, $isAutoRenew = FALSE) {
+  public static function updateActivityWithMessageTemplate($activityId, $activityType, $renewalReminder = 1, $memTypeId = NULL, $isJoiner = FALSE, $isAutoRenew = FALSE, $settings = array()) {
 
     if (empty($activityId) || empty($activityType)) {
       return;
     }
 
     // Get membership renewal settings
-    $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+    if (empty($settings)) {
+      $settings = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+    }
     $msgTemplateId = '';
 
-    $joinerStr = '';
-    if ($isJoiner == TRUE) {
-      $joinerStr = 'joiner_';
-    }
-
-    if ($isAutoRenew == TRUE) {
-      $joinerStr = 'autorenew_';
-    }
-
-    $emailTemplateKey = $joinerStr.'email_message_template_'.$renewalReminder;
-    $letterTemplateKey = $joinerStr.'letter_message_template_'.$renewalReminder;
-
-    // Email activity
-    if ($activityType == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_EMAIL_ACTIVITY_TYPE_NAME) {
-
-      // Check if there is membership type specific email message template
-      if (!empty($memTypeId) && !empty($settingsArray[$emailTemplateKey.'_'.$memTypeId])) {
-        $msgTemplateId = $settingsArray[$emailTemplateKey.'_'.$memTypeId];
-        // Check if same as default
-        if ($msgTemplateId == 'sameasdefault') {
-          $msgTemplateId = $settingsArray[$emailTemplateKey];  
-        }
-      } 
-      /*else { // else use default one
-        $msgTemplateId = $settingsArray[$emailTemplateKey];
-      }*/
-    }
-
-    // Letter activity
-    if ($activityType == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME) {
-
-      // Check if there is membership type specific letter message template
-      if (!empty($memTypeId) && !empty($settingsArray[$letterTemplateKey.'_'.$memTypeId])) {
-        $msgTemplateId = $settingsArray[$letterTemplateKey.'_'.$memTypeId];
-        // Check if same as default
-        if ($msgTemplateId == 'sameasdefault') {
-          $msgTemplateId = $settingsArray[$letterTemplateKey];  
-        }
-      } 
-      /*else { // else use default one
-        $msgTemplateId = $settingsArray[$letterTemplateKey];
-      }*/
-    }
+    // Get message templates for reminder and membership type
+    $msgTemplateId = self::getMessageTemplateForRenewalReminder($renewalReminder, $memTypeId, $activityType, $isJoiner, $isAutoRenew, $settings);
 
     // Get html after all tokens are replaced
     if (!empty($msgTemplateId)) {
@@ -1319,6 +1162,13 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
       // Update activity
       CRM_Membershiprenewal_Utils::CiviCRMAPIWrapper('Activity', 'create', $actUpdateParams);
     }
+
+    // Attach letter template with the activity
+    if ($settings['enable_attachment'] == 1) {
+      if (in_array($activityType, array(CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_EMAIL_ACTIVITY_TYPE_NAME, CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME))) {
+        self::attachLetterTemplate($renewalReminder, $activityId, $memTypeId, $isJoiner, $isAutoRenew);  
+      }
+    }
   }
 
   /**
@@ -1329,14 +1179,16 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
    *
    * @return int $msgTemplateId
    */
-  public static function getMessageTemplateForRenewalReminder($renewalReminder = 1, $memTypeId, $activityType, $isJoiner = FALSE, $isAutoRenew = FALSE) {
+  public static function getMessageTemplateForRenewalReminder($renewalReminder = 1, $memTypeId, &$activityType, $isJoiner = FALSE, $isAutoRenew = FALSE, $settings = array()) {
 
     if (empty($memTypeId) || empty($activityType)) {
       return;
     }
 
     // Get membership renewal settings
-    $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+    if (empty($settings)) {
+      $settings = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+    }
 
     $msgTemplateId = '';
 
@@ -1356,15 +1208,25 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
     if ($activityType == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_EMAIL_ACTIVITY_TYPE_NAME) {
 
       // Check if there is membership type specific email message template
-      if (!empty($memTypeId) && !empty($settingsArray[$emailTemplateKey.'_'.$memTypeId])) {
-        $msgTemplateId = $settingsArray[$emailTemplateKey.'_'.$memTypeId];
+      if (!empty($memTypeId) && !empty($settings[$emailTemplateKey.'_'.$memTypeId])) {
+        $msgTemplateId = $settings[$emailTemplateKey.'_'.$memTypeId];
         // Check if same as default
         if ($msgTemplateId == 'sameasdefault') {
-          $msgTemplateId = $settingsArray[$emailTemplateKey];  
+          $msgTemplateId = $settings[$emailTemplateKey];  
         }
-      } 
+      }
+      // Use letter template id, if email template is set to 'No Action' for New joiners
+      if ($isJoiner == TRUE && empty($msgTemplateId)) {
+        $msgTemplateId = $settings[$letterTemplateKey.'_'.$memTypeId];
+        // Check if same as default
+        if ($msgTemplateId == 'sameasdefault') {
+          $msgTemplateId = $settings[$emailTemplateKey];
+        }
+        // Set the activity type as Letter
+        $activityType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME;
+      }
       /*else { // else use default one
-        $msgTemplateId = $settingsArray[$emailTemplateKey];
+        $msgTemplateId = $settings[$emailTemplateKey];
       }*/
     }
 
@@ -1372,15 +1234,15 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
     if ($activityType == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME) {
 
       // Check if there is membership type specific letter message template
-      if (!empty($memTypeId) && !empty($settingsArray[$letterTemplateKey.'_'.$memTypeId])) {
-        $msgTemplateId = $settingsArray[$letterTemplateKey.'_'.$memTypeId];
+      if (!empty($memTypeId) && !empty($settings[$letterTemplateKey.'_'.$memTypeId])) {
+        $msgTemplateId = $settings[$letterTemplateKey.'_'.$memTypeId];
         // Check if same as default
         if ($msgTemplateId == 'sameasdefault') {
-          $msgTemplateId = $settingsArray[$letterTemplateKey];  
+          $msgTemplateId = $settings[$letterTemplateKey];  
         }
       } 
       /*else { // else use default one
-        $msgTemplateId = $settingsArray[$letterTemplateKey];
+        $msgTemplateId = $settings[$letterTemplateKey];
       }*/
     }
 
@@ -1405,9 +1267,12 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
 
     $activityIds = array();
 
+    // Get membership renewal settings
+    $settings = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+
     foreach ($activities as $activityId) {
       // Get activity details
-      $activityMiscDetails = CRM_Membershiprenewal_BAO_Batch::getActivitiesDetails($activityId);
+      $activityMiscDetails = self::getActivitiesDetails($activityId);
 
       $activityParams = array(
         'id' => $activityId,
@@ -1448,6 +1313,47 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
         // Update activity custom data and save membership id
         // as passing 'custom_' is not working in version 4.6
         self::insertCustomDataForActivity($activityCreateResult['id'], $activityMiscDetails['membership_id'], $activityMiscDetails['membership_end_date'], $activityMiscDetails['membership_communication_type']);
+
+        $isJoiner = FALSE;
+        if ($activityMiscDetails['membership_communication_type'] == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_NEW_JOINER) {
+          $isJoiner = TRUE;
+        }
+
+        $isAutoRenew = FALSE;
+        // Check if the membership is set for auto-renew (only for renewals)
+        // using the payment method in the related recurring record
+        if ($isJoiner == FALSE) {
+          $recurSql = "
+SELECT recur.payment_instrument_id
+FROM civicrm_membership member
+LEFT JOIN civicrm_contribution_recur recur ON member.contribution_recur_id = recur.id
+WHERE member.id = %1
+";
+          $recurParams = array(
+            '1' => array( $activityMiscDetails['membership_id'], 'Integer'),
+          );
+          $recurDao = CRM_Core_DAO::executeQuery($recurSql, $recurParams);
+          $recurDao->fetch();
+
+          $isAutoRenew = CRM_Membershiprenewal_BAO_Batch::checkIfRecurringIsAutoRenew($recurDao, $settings);
+        }
+
+        $memTypeId = NULL;
+        // Get membership type id for the membership
+        // to get membership type specific message template
+        if (!empty($activityMiscDetails['membership_id'])) {
+          $memResult = CRM_Membershiprenewal_Utils::CiviCRMAPIWrapper('Membership', 'get',array(
+            'sequential' => 1,
+            'id' => $activityMiscDetails['membership_id'],
+          ));
+          $memTypeId = $memResult['values'][0]['membership_type_id'];
+        }
+
+        // Prepare html using message template, to save in activity details section
+        // This is for sending scheduled reminders or print letters
+        // 1 - this is first renewal reminder
+        $actType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_EMAIL_ACTIVITY_TYPE_NAME;
+        self::updateActivityWithMessageTemplate($activityCreateResult['id'], $actType, $reminderType, $memTypeId, $isJoiner, $isAutoRenew, $settings);
       }
     }
   }
@@ -1460,9 +1366,9 @@ WHERE renewal.renewal_date >= %1 AND renewal.renewal_date <= %2
     $letterActType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME;
     $unknownActType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_UNKNOWN_ACTIVITY_TYPE_NAME;
 
-    $emailActTypeId = CRM_Membershiprenewal_BAO_Batch::getActivityTypeIDForName($emailActType);
-    $letterActTypeId = CRM_Membershiprenewal_BAO_Batch::getActivityTypeIDForName($letterActType);
-    $unknownActTypeId = CRM_Membershiprenewal_BAO_Batch::getActivityTypeIDForName($unknownActType);
+    $emailActTypeId = self::getActivityTypeIDForName($emailActType);
+    $letterActTypeId = self::getActivityTypeIDForName($letterActType);
+    $unknownActTypeId = self::getActivityTypeIDForName($unknownActType);
 
     $allActTypeIdStr = "{$emailActTypeId}, {$letterActTypeId}, {$unknownActTypeId}";
 

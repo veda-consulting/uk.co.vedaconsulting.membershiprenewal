@@ -153,7 +153,30 @@ function membershiprenewal_civicrm_navigationMenu(&$params){
 }
 
 function membershiprenewal_civicrm_alterMailParams(&$params, $context = NULL) {
+  if ($params['groupName'] == 'Scheduled Reminder Sender' && $params['entity'] == 'action_schedule') {
+    $checkParams = array(
+      'name' => CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_SCHEDULE_REMINDER_NAME,
+    );
+    $schuleReminderResult = CRM_Membershiprenewal_Utils::CiviCRMAPIWrapper('ActionSchedule', 'get', $checkParams);
+    // This is 'Send Membership Renewal Email' scheduled reminder
+    // and Check if we have activity id
+    if ($schuleReminderResult['id'] == $params['entity_id']
+      && isset($params['activity_id']) && !empty($params['activity_id'])) {
 
+      // Get membership renewal settings
+      $settings = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+
+      // Check if 'Enable Attachment?' is set
+      if ($settings['enable_attachment'] == 1) {
+
+        // Get activity attachments
+        $attachments = CRM_Core_BAO_File::getEntityFile('civicrm_activity', $params['activity_id']);
+        if (!empty($attachments)) {
+          $params['attachments'] = $attachments;
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -196,4 +219,21 @@ function membershiprenewal_civicrm_post($op, $objectName, $objectId, &$objectRef
       CRM_Core_DAO::executeQuery($updateSql, $updateParams);
     }
   }
+}
+
+/**
+ * Implements hook_civicrm_summaryActions().
+ *
+ * @link http://wiki.civicrm.org/confluence/display/CRMDOC/hook_civicrm_summaryActions
+ */
+function membershiprenewal_civicrm_summaryActions( &$actions, $contactID ) {
+  $renewalReminderTitle = ts('Send Renewal Reminder');
+  $actions['sendRenewalReminder'] = array(
+    'title'   => $renewalReminderTitle,
+    'weight'  => 1000,
+    'class'   => 'no-popup',
+    'ref'     => 'sendrenewalreminder',
+    'key'     => 'sendrenewalreminder',
+    'href'    => CRM_Utils_System::url('civicrm/renewal/single', 'reset=1&id='.$contactID),
+  );
 }

@@ -36,9 +36,11 @@ class CRM_Membershiprenewal_Page_MoveActivity extends CRM_Core_Page {
     switch ($moveto) {
     	case 'email':
     		$selectSql = "
-SELECT custom.membership_id, email.email, contact.do_not_email, contact.do_not_mail, contact.is_opt_out
+SELECT custom.membership_id, email.email, contact.do_not_email, contact.do_not_mail, contact.is_opt_out, custom.membership_communication_type, recur.payment_instrument_id
 FROM civicrm_activity a
 INNER JOIN civicrm_value_membership_renewal_information custom ON custom.entity_id = a.id
+INNER JOIN civicrm_membership member ON custom.membership_id = member.id 
+LEFT JOIN civicrm_contribution_recur recur ON member.contribution_recur_id = recur.id
 LEFT JOIN civicrm_activity_contact ac ON ac.activity_id = a.id AND ac.record_type_id = 3
 LEFT JOIN civicrm_contact contact ON contact.id = ac.contact_id
 LEFT JOIN civicrm_email email ON contact.id = email.contact_id AND email.on_hold = 0
@@ -63,9 +65,11 @@ LEFT JOIN civicrm_email email ON contact.id = email.contact_id AND email.on_hold
 
     	case 'print':
     		$selectSql = "
-SELECT custom.membership_id, address.street_address, address.postal_code, contact.do_not_mail, contact.is_opt_out
+SELECT custom.membership_id, address.street_address, address.supplemental_address_1, address.supplemental_address_2, address.supplemental_address_3, address.postal_code, contact.do_not_mail, contact.is_opt_out, custom.membership_communication_type, recur.payment_instrument_id
 FROM civicrm_activity a
 INNER JOIN civicrm_value_membership_renewal_information custom ON custom.entity_id = a.id
+INNER JOIN civicrm_membership member ON custom.membership_id = member.id 
+LEFT JOIN civicrm_contribution_recur recur ON member.contribution_recur_id = recur.id
 LEFT JOIN civicrm_activity_contact ac ON ac.activity_id = a.id AND ac.record_type_id = 3
 LEFT JOIN civicrm_contact contact ON contact.id = ac.contact_id
 LEFT JOIN civicrm_address address ON contact.id = address.contact_id
@@ -74,11 +78,24 @@ LEFT JOIN civicrm_address address ON contact.id = address.contact_id
 	    	$selectDao = CRM_Core_DAO::executeQuery($selectSql, $selectParams);
 	    	$selectDao->fetch();
 	    	// Check if we have a valid address
-      	// 1. Street address and Postcode are not empty
-      	// 2. Contact does not have DO NOT MAIL flag ticked
-	  		if (!empty($selectDao->street_address) && 
-        	!empty($selectDao->postal_code) 
-        	&& $selectDao->do_not_mail == 0) {
+        // 1. Any 2 address lines are available
+        // - street_address
+        // - supplemental_address_1
+        // - supplemental_address_2
+        // - supplemental_address_3
+        // - postal_code
+        // 2. Contact does not have DO NOT MAIL flag ticked
+        $address = array(
+          $selectDao->street_address,
+          $selectDao->supplemental_address_1,
+          $selectDao->supplemental_address_2,
+          $selectDao->supplemental_address_3,
+          //$selectDao->city,
+          $selectDao->postal_code,
+        );
+        // Remove empty lines from the address array
+        $address = array_filter($address);
+	  		if (count($address) >= 2 && $selectDao->do_not_mail == 0) {
 	        $activityType = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_LETTER_ACTIVITY_TYPE_NAME;
 	      	$queue = 'Print';
           $memId = $selectDao->membership_id;
@@ -132,9 +149,24 @@ LEFT JOIN civicrm_address address ON contact.id = address.contact_id
         $memTypeId = $memResult['values'][0]['membership_type_id'];
       }
 
+      // Get membership renewal settings
+      $settings = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+
+      $isJoiner = FALSE;
+      if ($selectDao->membership_communication_type == CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_COMMUNICATION_TYPE_NEW_JOINER) {
+        $isJoiner = TRUE;
+      }
+
+      $isAutoRenew = FALSE;
+      // Check if the membership is set for auto-renew (only for renewals)
+      // using the payment method in the related recurring record
+      if ($isJoiner == FALSE) {
+        $isAutoRenew = CRM_Membershiprenewal_BAO_Batch::checkIfRecurringIsAutoRenew($selectDao, $settings);
+      }
+
       // Prepare html using message template, to save in activity details section
       // This is for sending scheduled reminders or print letters
-      CRM_Membershiprenewal_BAO_Batch::updateActivityWithMessageTemplate($activityResult['id'], $activityType, $memTypeId);
+      CRM_Membershiprenewal_BAO_Batch::updateActivityWithMessageTemplate($activityResult['id'], $activityType, $reminderType, $memTypeId, $isJoiner, $isAutoRenew, $settings);
     }
 
     $message = ts("Activity moved to {$queue} queue.");
