@@ -101,6 +101,11 @@ class CRM_Membershiprenewal_Constants {
 
   const MEMBERSHIP_RENEWAL_START_YEAR_MONTH_OFFSET = 12;
 
+  const ACTIVITY_TYPE_EXCLUDED_DUE_TO_CONFIG_NAME = 'excluded_due_to_config';
+  const EXCLUDED_DUE_TO_CONFIG_MESSAGE = 'Excluded due to membership status config';
+  const EXCLUDED_DUE_TO_CONFIG_ACTIVITY_SUBJECT = 'Excluded due to membership status setting';
+  const EXCLUDED_DUE_TO_CONFIG_ACTIVITY_DETAILS = 'No communication sent due to membership status';
+	
   const MEMBERSHIP_RENEWAL_QUEUE_NAME = 'process-membership-communications';
 
   const BATCH_COUNT = 10;

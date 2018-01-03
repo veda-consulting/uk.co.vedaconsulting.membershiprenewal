@@ -811,27 +811,15 @@ renewal_date IS NOT NULL AND renewal_date != ''
       CRM_Core_DAO::executeQuery($sql);
     }
 
-    $sql = "DELETE FROM {$tempTableName} WHERE communication_type = 'Renewal' AND contact_id NOT IN (SELECT contact_id FROM civicrm_group_contact where group_id = 20)";
-    CRM_Core_DAO::executeQuery($sql);
-    $sql = "DELETE FROM {$tempTableName} WHERE contact_id IN (8266, 8519)";
-    CRM_Core_DAO::executeQuery($sql);    
-
-    //MV Temp fix to run renewal more than once in month
-    $sql = "DELETE FROM {$tempTableName} WHERE communication_type = 'Renewal' AND contact_id IN (
-      SELECT c.contact_id FROM `civicrm_membership_renewal_entity_batch` a 
-      INNER JOIN civicrm_activity b ON (a.activity_id = b.id)
-      INNER JOIN civicrm_activity_contact c ON (c.activity_id = a.id)
-      WHERE c.record_type_id = 3
-    )";
-    CRM_Core_DAO::executeQuery($sql);
-    
-    //Dont renew who does have -1 membership_fee (who doesn't match combination in joining matrix)
-    $sql = "DELETE FROM {$tempTableName} WHERE communication_type = 'Renewal' AND contact_id IN (
-      SELECT b.contact_id FROM `civicrm_value_renewal_information` a 
-      INNER JOIN civicrm_membership b ON (a.entity_id = b.id) 
-      WHERE a.renewal_fee < 0
-    )";
-    CRM_Core_DAO::executeQuery($sql);    
+    // PK: Check if "membership status exclude" setting is set. If yes, update the reason column
+    $excludedMemStatus = $settingsArray['membership_status'];
+    if (!empty($excludedMemStatus)) {
+      // Excluded due to config message
+      $excludedDueToConfigMessage = CRM_Membershiprenewal_Constants::EXCLUDED_DUE_TO_CONFIG_MESSAGE;
+      $excludedMemStatusStr = implode(", ", $excludedMemStatus);
+      $sql = "UPDATE {$tempTableName} SET reason = IF(reason IS NULL, '{$excludedDueToConfigMessage}', CONCAT(reason, ':', '{$excludedDueToConfigMessage}')), status = 0 WHERE membership_status_id IN ({$excludedMemStatusStr})";
+      CRM_Core_DAO::executeQuery($sql);
+    }    
 
     return TRUE;
 
