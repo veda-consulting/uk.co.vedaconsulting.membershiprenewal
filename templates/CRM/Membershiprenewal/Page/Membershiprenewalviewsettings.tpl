@@ -7,7 +7,12 @@
 <div class="crm-block crm-form-block crm-dotmailer-mapping-list-form-block">
     <div>
       {if $memRenewalSettings}
-        <div class="crm-accordion-wrapper crm-accordion_title-accordion crm-accordion-closed">
+        {if $memRenewalSettings.is_test}
+          <div class="alert alert-warning">
+            <strong>Warning!</strong>  {ts}Membership Renewal has been to set to <strong>Test Mode</strong>{/ts}
+          </div>
+        {/if}
+				<div class="crm-accordion-wrapper crm-accordion_title-accordion crm-accordion-closed">
             <div class="crm-accordion-header">
                 Communications parameters
             </div>
@@ -119,6 +124,24 @@
 
     </div>
 </div>
+
+{literal}
+<style type="text/css">
+ .alert {
+  padding: 15px;
+  margin-bottom: 20px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+ }
+
+ .alert-warning {
+  color: #a94442;
+  background-color: #f2dede;
+  border-color: #ebccd1;
+ }
+
+</style>
+{/literal}
 
 {if $batchList}
   {literal}

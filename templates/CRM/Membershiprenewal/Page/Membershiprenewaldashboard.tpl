@@ -1,3 +1,9 @@
+{if $memRenewalSettings.is_test}
+  <div class="alert alert-warning">
+    <strong>Warning!</strong>  {ts}Membership Renewal has been to set to <strong>Test Mode</strong>{/ts}
+  </div>
+{/if}
+
 {if $memRenewalSettings.include_joiner eq 1}
 <h3>Membership Communications - New Joiners & Renewals</h3>
 {else}
@@ -110,6 +116,24 @@
     </div>
 </div>-->
 {/if}
+
+{literal}
+<style type="text/css">
+ .alert {
+  padding: 15px;
+  margin-bottom: 20px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+ }
+
+ .alert-warning {
+  color: #a94442;
+  background-color: #f2dede;
+  border-color: #ebccd1;
+ }
+
+</style>
+{/literal}
 
 {if $batchList}
   {literal}

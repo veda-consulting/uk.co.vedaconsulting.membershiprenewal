@@ -2,6 +2,12 @@
 
 <div class="crm-block crm-form-block crm-dotmailer-mapping-form-block">
 
+{if $memRenewalSettings.is_test}
+  <div class="alert alert-warning">
+    <strong>Warning!</strong>  {ts}Membership Renewal has been to set to <strong>Test Mode</strong>{/ts}
+  </div>
+{/if}
+
 <div class="crm-accordion-wrapper">
 	<div class="crm-accordion-header">
 		<span>{ts}Batch Details{/ts}</span>
@@ -344,6 +350,22 @@ cj('#unknownActivities').DataTable({
 </div>
 
 {literal}
+<style type="text/css">
+ .alert {
+  padding: 15px;
+  margin-bottom: 20px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+ }
+
+ .alert-warning {
+  color: #a94442;
+  background-color: #f2dede;
+  border-color: #ebccd1;
+ }
+
+</style>
+
 <script>
 
 cj( document ).ready(function() {

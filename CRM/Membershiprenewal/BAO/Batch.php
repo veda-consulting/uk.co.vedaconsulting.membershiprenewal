@@ -239,6 +239,12 @@ LEFT JOIN civicrm_membership m ON m.id = custom.{$customFieldColumnName}
     $session =& CRM_Core_Session::singleton( );
     $userContactId = $session->get( 'userID' ); // which is contact id of the user
 
+    //MV:03Jan2018 Update test mode based on setting
+    //Get renewal settings
+    $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
+    $params['is_test'] = CRM_Utils_Array::value('is_test', $settingsArray, 0);
+    //End MV test mode changes
+		
     $params['name'] = CRM_Utils_String::titleToVar($params['title']);
     $params['created_id'] = $userContactId;
 
@@ -420,7 +426,7 @@ VALUES ({$batchId}, {$activityId}, {$reminder_type})
       'status_id' => CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_SCHEDULED_ACTIVITY_STATUS_ID, // Scheduled status
       'source_contact_id' => $userContactId,
       'target_contact_id' => $activityObj->contact_id,
-      'is_test' => 0,
+      'is_test' => $settingsArray['is_test'], //MV:03Jan2018 set is_test from setting
     );
 
     // Create activity using API
@@ -559,7 +565,7 @@ WHERE renewal.status = 1 AND renewal.id IN ($renewalIds)
         'status_id' => CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_SCHEDULED_ACTIVITY_STATUS_ID, // Scheduled status
         'source_contact_id' => $userContactId,
         'target_contact_id' => $selectDao->contact_id,
-        'is_test' => 0,
+        'is_test' => $settings['is_test'], //MV:03Jan2018 set is_test from setting
       );
 
       // Create activity using API
@@ -1303,7 +1309,7 @@ GROUP BY renewal.membership_id
         'status_id' => CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_SCHEDULED_ACTIVITY_STATUS_ID, // Scheduled status
         'source_contact_id' => $userContactId,
         'target_contact_id' => $activityMiscDetails['contact_id'],
-        'is_test' => 0,
+        'is_test' => $settings['is_test'], //MV:03Jan2018 set is_test from setting
       );
 
       // Create activity using API

@@ -448,6 +448,19 @@
 				<div class="clear"></div>
 			</div>
 			<div class="clear"></div>
+			<!--MV:03Jan2018 Enable Test mode -->
+			<br />
+			<h3>Do you want to enable test mode ?</h3>
+			<div class="crm-section is_test">
+				<div class="label">{$form.is_test.label}</div>
+					<div class="content">
+					{$form.is_test.html}
+				  <br />
+				  <span class="description"><strong>IMPORTANT:</strong> This option is to create activity and batch in test mode (is_test). so reminder would not sent email out by using this test mode. Please remember to untick this option once you ready to send reminder email out </span>
+				</div>
+				<div class="clear"></div>
+			</div>			
+			<div class="clear"></div>
 			<input class="pre_btn" name="previous" type="button" value="Previous">
 			<input class="submit_btn" type="submit" value="Submit">
 		</fieldset>

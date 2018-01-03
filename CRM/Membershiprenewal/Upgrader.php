@@ -111,5 +111,23 @@ class CRM_Membershiprenewal_Upgrader extends CRM_Membershiprenewal_Upgrader_Base
     }
     return TRUE;
   } // */
+	/**
+   * Alter table with test mode.
+   *
+   * @return TRUE on success
+   * @throws Exception
+  */
+  public function upgrade_1001() {
+    $this->ctx->log->info('Applying update 1001');
+    // this path is relative to the extension base dir
+    $tableName = 'civicrm_membership_renewal_batch';
+    $colName   = 'is_test';
 
+    if (CRM_Core_DAO::checkTableExists($tableName)
+      && !CRM_Core_DAO::checkFieldExists($tableName, $colName)
+    ) {
+      CRM_Core_DAO::executeQuery("ALTER TABLE {$tableName} ADD {$colName} tinyint(4) DEFAULT '0'");
+    }
+    return TRUE;
+  } //
 }

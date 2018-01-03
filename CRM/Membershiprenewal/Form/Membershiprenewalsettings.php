@@ -40,6 +40,13 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       ts('Enable Word Mailmerge?')
     );
 
+    //MV:03Jan2018 Enable Test mode?
+    $this->addElement(
+      'checkbox',
+      'is_test',
+      ts('Enable Test Mode ?')
+    );
+		
     // Enable SMS?
     $this->addElement(
       'checkbox', 
@@ -566,7 +573,10 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       $settingsArray['renewal_third_reminder'] = $values['renewal_third_reminder'];
     }
 
-    //// Membership type specific message template settings
+    //MV:03Jan2018 update test mode in setting
+    $settingsArray['is_test'] = $values['is_test'];
+    
+		//// Membership type specific message template settings
     // Get all membership types
     $memTypes = CRM_Membershiprenewal_Utils::getAllMembershipTypes();
 
