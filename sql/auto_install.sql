@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS `civicrm_membership_renewal_batch` (
   `first_reminder_date` datetime DEFAULT NULL COMMENT 'First reminder date same as created date',
   `second_reminder_date` datetime DEFAULT NULL COMMENT 'Second reminder date',
   `third_reminder_date` datetime DEFAULT NULL COMMENT 'Third reminder date',
+	`is_test` tinyint(4) DEFAULT '0' COMMENT 'Test mode indication',
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci;
 

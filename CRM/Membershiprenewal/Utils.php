@@ -83,6 +83,32 @@ class CRM_Membershiprenewal_Utils {
   }
 
   /**
+   * Get all current membership statuses
+   *
+   * @return array of membership statuses ids
+   */
+  public static function getAllCurrentMembershipStatuses() {
+    // Get all current membership statuses
+    $memStatusResult = self::CiviCRMAPIWrapper('MembershipStatus', 'get', array(
+      'sequential' => 1,
+      'return' => array("id"),
+      'is_current_member' => 1,
+    ));
+
+    // Return if there are no current membership statuses
+    if (empty($memStatusResult['values'])) {
+      return;
+    }
+
+    $curMemStatuses = array();
+    foreach ($memStatusResult['values'] as $key => $value) {
+      $curMemStatuses[] = $value['id'];
+    }
+
+    return $curMemStatuses;
+  }
+
+  /**
    * Get all activity types
    *
    * @return array of membership types ids, title
@@ -114,13 +140,30 @@ class CRM_Membershiprenewal_Utils {
    *
    * @return array of membership types ids
    */
-  public static function getAllMembershipTypesSetForRenewal() {
+  public static function getAllMembershipTypesSetForRenewal($isJoiner = FALSE) {
 
     $settingsArray = CRM_Membershiprenewal_Utils::getMembershipRenewalSettings();
-    foreach($settingsArray as $key => $value) {
-      if (strpos($key, '_message_template_1_') !== false) {
-        $tempArray = @explode('_message_template_1_', $key);
-        $memTypes[$tempArray[1]] = $tempArray[1];
+
+    // New joiner emails/letters
+    if ($isJoiner) {
+      foreach($settingsArray as $key => $value) {
+        if (strpos($key, 'joiner_email_message_template_1_') !== false) {
+          $tempArray = @explode('joiner_email_message_template_1_', $key);
+          $memTypes[$tempArray[1]] = $tempArray[1];
+        }
+        if (strpos($key, 'joiner_letter_message_template_1_') !== false) {
+          $tempArray = @explode('joiner_letter_message_template_1_', $key);
+          $memTypes[$tempArray[1]] = $tempArray[1];
+        }
+      }
+    }
+    // Renewal emails/letters
+    else {
+      foreach($settingsArray as $key => $value) {
+        if (strpos($key, '_message_template_1_') !== false) {
+          $tempArray = @explode('_message_template_1_', $key);
+          $memTypes[$tempArray[1]] = $tempArray[1];
+        }
       }
     }
 
@@ -281,7 +324,7 @@ class CRM_Membershiprenewal_Utils {
 
     // Return if the setting params are not available
     if (empty($settingsArray['renewal_years']) || empty($settingsArray['renewal_period'])) {
-        return;
+        // return;
     }
 
     // Get all current membership statuses
@@ -323,6 +366,16 @@ class CRM_Membershiprenewal_Utils {
       $allNonAutoRenewMemTypesSQL = '';
     }
 
+    // PK: Check if "membership status exclude" setting is set. If yes, exclude them from current status(s) array
+    $excludedMemStatus = $settingsArray['membership_status'];
+    if (!empty($excludedMemStatus)) {
+      foreach ($curMemStatuses as $key => $status) {
+        if (in_array($status, $excludedMemStatus)) {
+          unset($curMemStatuses[$key]);
+        }
+      }
+    }
+    
     $curMemStatusesStr = implode(',', $curMemStatuses);
 
     $tableName = CRM_Membershiprenewal_Constants::MEMBERSHIP_RENEWAL_TABLE_NAME;
@@ -335,8 +388,28 @@ class CRM_Membershiprenewal_Utils {
     CRM_Core_DAO::executeQuery("TRUNCATE TABLE {$tableName}");
 
     for ($j = 1; $j <= $renewalYears; $j++) {
-      // Select all memberships with current membership statuses
-      $sql = "
+
+      // Check if the first end date is set
+      // If yes, we need to workout the renewal date off the membership end date
+      if (isset($settingsArray['fixed_period_end_day']) && !empty($settingsArray['fixed_period_end_day'])) {
+        $day = $settingsArray['fixed_period_end_day']['d'];
+        $month = $settingsArray['fixed_period_end_day']['M'];
+        // Select all memberships with current membership statuses
+        $sql = "
+INSERT INTO $tableName (membership_id, membership_type_id, contact_id, join_date, start_date, end_date, renewal_date)
+SELECT m.id, m.membership_type_id, m.contact_id, m.join_date, m.start_date, m.end_date, 
+DATE_SUB(
+  CONCAT(YEAR(m.end_date), '-{$month}-{$day}'),
+INTERVAL {$renewalPeriod} MONTH)  as renewal_date
+FROM civicrm_membership m
+INNER JOIN civicrm_contact c ON m.contact_id = c.id
+WHERE m.join_date IS NOT NULL AND c.is_deleted = 0 AND m.status_id IN ({$curMemStatusesStr}) AND m.is_test = 0 {$allNonAutoRenewMemTypesSQL}
+";
+      }
+      // Else we need to workout the renewal date off from the join date
+      else {
+        // Select all memberships with current membership statuses
+        $sql = "
 INSERT INTO $tableName (membership_id, membership_type_id, contact_id, join_date, start_date, end_date, renewal_date)
 SELECT m.id, m.membership_type_id, m.contact_id, m.join_date, m.start_date, m.end_date, 
 DATE_SUB(
@@ -348,6 +421,7 @@ FROM civicrm_membership m
 INNER JOIN civicrm_contact c ON m.contact_id = c.id
 WHERE m.join_date IS NOT NULL AND c.is_deleted = 0 AND m.status_id IN ({$curMemStatusesStr}) AND m.is_test = 0 {$allNonAutoRenewMemTypesSQL}
 ";
+      }
       CRM_Core_DAO::executeQuery($sql);
     }
   }
@@ -448,7 +522,8 @@ WHERE m.join_date IS NOT NULL AND c.is_deleted = 0 AND m.status_id IN ({$curMemS
       $params = array('1' => array($key, 'String'));
       $dao = CRM_Core_DAO::executeQuery($sql, $params);
       if ($dao->fetch()) {
-        unset($renewalList[$key]);
+        //MV: FIXME, Commenting this line. Temp fix to run renewals more than once in a month.
+        // unset($renewalList[$key]);
       }
     }
 
@@ -726,5 +801,37 @@ WHERE a.batch_id = %1
     }
 
     return $SMSproviderId;
+  }
+
+  /**
+   * Function to get membership type period (Fixed/Rolling)
+   * We are going to check the first record and assume it is the same for all membership types
+   */
+  public static function getMembershipTypePeriod() {
+
+    // Get first membership type
+    $result = self::CiviCRMAPIWrapper('MembershipType', 'get', array(
+      'sequential' => 1,
+      'options' => array('limit' => 1),
+    ));
+
+    return $result['values'][0]['period_type'];
+  }
+
+  /**
+   * Function to generate tiny URL
+   */
+  function getTinyUrl($url) {
+
+    $url = html_entity_decode($url);
+
+    $ch = curl_init();  
+    $timeout = 5;  
+    curl_setopt($ch,CURLOPT_URL,'http://tinyurl.com/api-create.php?url='.$url);  
+    curl_setopt($ch,CURLOPT_RETURNTRANSFER,1);  
+    curl_setopt($ch,CURLOPT_CONNECTTIMEOUT,$timeout);  
+    $data = curl_exec($ch);  
+    curl_close($ch);  
+    return $data;  
   }
 }

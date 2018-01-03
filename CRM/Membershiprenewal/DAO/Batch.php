@@ -145,6 +145,12 @@ class CRM_Membershiprenewal_DAO_Batch extends CRM_Core_DAO
    */
   public $third_reminder_date;
   /**
+   * Is Test
+   *
+   * @var tiny int
+   */
+  public $is_test;  
+	/**
    * cache entered data
    *
    * @var longtext
@@ -278,6 +284,12 @@ class CRM_Membershiprenewal_DAO_Batch extends CRM_Core_DAO
             'type' => 'Select Date',
           ) ,
         ) ,
+        'is_test' => array(
+          'name' => 'is_test',
+          'type' => CRM_Utils_Type::T_BOOLEAN,
+          'title' => ts('Is Test') ,
+          'description' => 'Test mode',
+        ) ,				
       );
     }
     return self::$_fields;

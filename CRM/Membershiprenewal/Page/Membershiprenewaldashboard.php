@@ -8,12 +8,12 @@ class CRM_Membershiprenewal_Page_Membershiprenewaldashboard extends CRM_Core_Pag
     // Delete all batches and related activities
     if (isset($_GET['action']) && $_GET['action'] == 'deleteallbatches') {
 
-      CRM_Membershiprenewal_BAO_Batch::resetAllMembershipCommunications();
+      // CRM_Membershiprenewal_BAO_Batch::resetAllMembershipCommunications();
 
       $url = CRM_Utils_System::url('civicrm/membershiprenewal', "reset=1");
 
-      $message = "All batches and related activies deleted.";
-      CRM_Core_Session::setStatus($message, 'Membership Communications Dashboard', 'success');
+      // $message = "All batches and related activies deleted.";
+      // CRM_Core_Session::setStatus($message, 'Membership Communications Dashboard', 'success');
       CRM_Utils_System::redirect($url);
       CRM_Utils_System::civiExit();
     }

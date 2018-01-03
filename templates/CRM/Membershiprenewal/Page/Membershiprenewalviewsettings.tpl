@@ -7,7 +7,12 @@
 <div class="crm-block crm-form-block crm-dotmailer-mapping-list-form-block">
     <div>
       {if $memRenewalSettings}
-        <div class="crm-accordion-wrapper crm-accordion_title-accordion crm-accordion-closed">
+        {if $memRenewalSettings.is_test}
+          <div class="alert alert-warning">
+            <strong>Warning!</strong>  {ts}Membership Renewal has been to set to <strong>Test Mode</strong>{/ts}
+          </div>
+        {/if}
+				<div class="crm-accordion-wrapper crm-accordion_title-accordion crm-accordion-closed">
             <div class="crm-accordion-header">
                 Communications parameters
             </div>
@@ -27,6 +32,10 @@
                 </thead>
                 <tbody>
                 <tr>
+                  <td>Include New Joiners?</td>
+                  <td>{if $memRenewalSettings.include_joiner}Yes{else}No{/if}</td>
+                </tr>
+                <tr>
                   <td>Renewal Years</td>
                   <td>{$memRenewalSettings.renewal_years} years</td>
                 </tr>
@@ -34,25 +43,39 @@
                   <td>Renewal Period</td>
                   <td>{$memRenewalSettings.renewal_period} months</td>
                 </tr>
-                <tr>
+                <!--<tr>
                   <td>Start Offset</td>
                   <td>{$memRenewalSettings.renewal_start_offset} months</td>
-                </tr>
+                </tr>-->
                 <!--<tr>
                   <td>End Offset</td>
                   <td>{$memRenewalSettings.renewal_end_offset} months</td>
                 </tr>-->
+                {if $memRenewalSettings.renewal_first_reminder}
                 <tr>
                   <td>1st Reminder</td>
                   <td>{$memRenewalSettings.renewal_first_reminder} days</td>
                 </tr>
+                {/if}
                 <tr>
                   <td>2nd Reminder</td>
-                  <td>{$memRenewalSettings.renewal_second_reminder} days</td>
+                  <td>
+                    {if $memRenewalSettings.enable_second_reminder}
+                      {$memRenewalSettings.renewal_second_reminder} days
+                    {else}
+                      {ts}Disabled{/ts}
+                    {/if}
+                  </td>
                 </tr>
                 <tr>
                   <td>3rd Reminder</td>
-                  <td>{$memRenewalSettings.renewal_third_reminder} days</td>
+                  <td>
+                    {if $memRenewalSettings.enable_third_reminder}
+                      {$memRenewalSettings.renewal_third_reminder} days
+                    {else}
+                      {ts}Disabled{/ts}
+                    {/if}
+                  </td>
                 </tr>
                 <!--<tr>
                   <td>Email Message template</td>
@@ -101,6 +124,24 @@
 
     </div>
 </div>
+
+{literal}
+<style type="text/css">
+ .alert {
+  padding: 15px;
+  margin-bottom: 20px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+ }
+
+ .alert-warning {
+  color: #a94442;
+  background-color: #f2dede;
+  border-color: #ebccd1;
+ }
+
+</style>
+{/literal}
 
 {if $batchList}
   {literal}

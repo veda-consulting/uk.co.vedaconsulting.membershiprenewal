@@ -40,11 +40,25 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       ts('Enable Word Mailmerge?')
     );
 
+    //MV:03Jan2018 Enable Test mode?
+    $this->addElement(
+      'checkbox',
+      'is_test',
+      ts('Enable Test Mode ?')
+    );
+		
     // Enable SMS?
     $this->addElement(
       'checkbox', 
       'enable_sms', 
       ts('Enable SMS?')
+    );
+
+    // Enable Attachment?
+    $this->addElement(
+      'checkbox', 
+      'enable_attachment', 
+      ts('Enable Attachment?')
     );
 
     // SMS message
@@ -73,7 +87,7 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       ts('Renewal Years'),
       array('size' => 2),
       TRUE
-    );
+    );*/
 
     // Renewal Period
     $this->add(
@@ -85,7 +99,7 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
     );
 
     // Renewal start offset
-    $this->add(
+    /*$this->add(
       'text',
       'renewal_start_offset',
       ts('Renewal Start Offset'),
@@ -136,13 +150,20 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       '0' => ts('Other'),
     );
 
+    // Enable 2nd reminder?
+    $this->addElement(
+      'checkbox',
+      'enable_second_reminder',
+      ts('Enable second reminder?')
+    );
+
     $this->addRadio(
       'renewal_second_reminder',
       ts('2nd reminder'),
       $secondRenewalPeriods,
       NULL,
       '<br>',
-      TRUE
+      FALSE
     );
 
     // other option field
@@ -164,13 +185,20 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       '1' => ts('1 day'),
     );
 
+    // Enable 3rd reminder?
+    $this->addElement(
+      'checkbox',
+      'enable_third_reminder',
+      ts('Enable third reminder?')
+    );
+
     $this->addRadio(
       'renewal_third_reminder',
       ts('3rd reminder'),
       $thirdRenewalPeriods,
       NULL,
       '<br>',
-      TRUE
+      FALSE
     );
     // End of GK
 
@@ -200,6 +228,14 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       TRUE
     );*/
 
+    // Get membership type period (fixed/rolling)
+    $memTypePlan = CRM_Membershiprenewal_Utils::getMembershipTypePeriod();
+    $this->assign('memTypePlan', $memTypePlan);
+
+    $this->add('date', 'fixed_period_end_day', ts('Membership End Day'),
+      CRM_Core_SelectValues::date(NULL, 'M d'), FALSE
+    );
+
     // Auto-renew payment instruments
     $this->add(
       'select',
@@ -209,7 +245,16 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       false,
       array('class' => 'crm-select2 huge', 'multiple' => 'multiple',)
     );
-    
+
+    // Renewal page link
+    $this->add(
+      'text',
+      'renewal_page_link',
+      ts('Membership Renewal Page'),
+      array('class' => 'huge'),
+      FALSE
+    );
+
     $memTypesBaseMsgTemplates = CRM_Membershiprenewal_Constants::$memTypesBaseMsgTemplates;
 
     // Include New Joiners?
@@ -221,6 +266,12 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
 
     $this->addDate('cut_off_date', ts('Cut Off Date'), FALSE, array('formatType' => 'activityDate'));
 
+    // Membership status
+    $membershipStatus = CRM_Member_PseudoConstant::membershipStatus();
+    $this->add('select', 'membership_status', ts('Membership Status(s)'), $membershipStatus, FALSE,
+      array('id' => 'membership_status', 'multiple' => 'multiple', 'class' => 'crm-select2', 'style' => 'width: 50%;')
+    );
+    
     $noOfJoinerArray = array();
 
     for ($i=1; $i <=1; $i++) {
@@ -404,11 +455,24 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       $defaultsArray['cut_off_date'] = $cutOffDate[0];
     }
     if (empty($defaultsArray['sms_text_message'])) {
-      $defaultsArray['sms_text_message'] = 'Your membership is up for renewal. Click the link to renew {renewal.link}';
+      $defaultsArray['sms_text_message'] = 'Your membership is up for renewal. Click the link to renew {membershiprenewal.renewal_page_link}';
     }
     if (empty($defaultsArray['sms_activity_subject'])) {
       $defaultsArray['sms_activity_subject'] = 'Membership Renewal SMS';
     }
+
+    // Unset first reminder value, if we have other value
+    // so the defaults are set correctly
+    if (isset($defaultsArray['renewal_first_reminder_other']) && !empty($defaultsArray['renewal_first_reminder_other'])) {
+      $defaultsArray['renewal_first_reminder'] = 0;
+    }
+
+    // Unset second reminder value, if we have other value
+    // so the defaults are set correctly
+    if (isset($defaultsArray['renewal_second_reminder_other']) && !empty($defaultsArray['renewal_second_reminder_other'])) {
+      $defaultsArray['renewal_second_reminder'] = 0;
+    }
+
     $this->setDefaults($defaultsArray);
 
     $this->assign('memTypes', $memTypes);
@@ -441,6 +505,18 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       }
     }
 
+    if (isset($params['enable_second_reminder']) && $params['enable_second_reminder'] == 1) {
+      if (empty($params['renewal_second_reminder']) && empty($params['renewal_second_reminder_other'])) {
+        $errors['renewal_second_reminder'] = ts('Please select when you want to send second reminder.');
+      }
+    }
+
+    if (isset($params['enable_third_reminder']) && $params['enable_third_reminder'] == 1) {
+      if (empty($params['renewal_third_reminder'])) {
+        $errors['renewal_third_reminder'] = ts('Please select when you want to send third reminder.');
+      }
+    }
+
     return empty($errors) ? TRUE : $errors;
   }
 
@@ -453,24 +529,54 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
     //$settingsArray['renewal_start_offset'] = $values['renewal_start_offset'];
 
     $settingsArray['renewal_years'] = 1; // setting 1 as default value
-    $settingsArray['renewal_period'] = 1; // setting 1 as default value
+    //$settingsArray['renewal_period'] = 1; // setting 1 as default value
+    $settingsArray['renewal_period'] = $values['renewal_period'];
     $settingsArray['renewal_start_offset'] = 0; // setting 1 as default value
-
-    //$settingsArray['renewal_end_offset'] = $values['renewal_end_offset'];
-    //if (empty($settingsArray['renewal_end_offset'])) {
     $settingsArray['renewal_end_offset'] = 2;
-    //}
+
     //$settingsArray['email_message_template'] = $values['email_message_template'];
     //$settingsArray['letter_message_template'] = $values['letter_message_template'];
 
     $settingsArray['autorenew_payment_instrument_id'] = $values['autorenew_payment_instrument_id'];
-    $settingsArray['renewal_first_reminder'] = $values['renewal_first_reminder'] ? $values['renewal_first_reminder'] : 0;
-    $settingsArray['renewal_first_reminder_other'] = $values['renewal_first_reminder_other'];
-    $settingsArray['renewal_second_reminder'] = $values['renewal_second_reminder'] ? $values['renewal_second_reminder'] :0;
-    $settingsArray['renewal_second_reminder_other'] = $values['renewal_second_reminder_other'];
-    $settingsArray['renewal_third_reminder'] = $values['renewal_third_reminder'];
+    if (isset($values['fixed_period_end_day']) && !empty($values['fixed_period_end_day'])) {
+      $settingsArray['fixed_period_end_day'] = $values['fixed_period_end_day'];
+    }
+    $settingsArray['renewal_page_link'] = $values['renewal_page_link'];
+    $settingsArray['renewal_page_tiny_url'] = '';
+    if (!empty($values['renewal_page_link'])) {
+      $settingsArray['renewal_page_tiny_url'] = CRM_Membershiprenewal_Utils::getTinyUrl($values['renewal_page_link']);
+    }
+    
+    // First reminder
+    if (!empty($values['renewal_first_reminder_other']) && !isset($values['renewal_first_reminder'])) {
+      $settingsArray['renewal_first_reminder'] = $values['renewal_first_reminder_other'];
+      $settingsArray['renewal_first_reminder_other'] = $values['renewal_first_reminder_other'];
+    } else {
+      $settingsArray['renewal_first_reminder'] = $values['renewal_first_reminder'];
+    }
+    // Second reminder
+    $settingsArray['enable_second_reminder'] = 0;
+    if (isset($values['enable_second_reminder']) && $values['enable_second_reminder'] == 1) {
+      $settingsArray['enable_second_reminder'] = 1;
+      if (!empty($values['renewal_second_reminder_other']) && !isset($values['renewal_second_reminder'])) {
+        $settingsArray['renewal_second_reminder'] = $values['renewal_second_reminder_other'];
+        $settingsArray['renewal_second_reminder_other'] = $values['renewal_second_reminder_other'];
+      } else {
+        $settingsArray['renewal_second_reminder'] = $values['renewal_second_reminder'];
+      }
+    }
 
-    //// Membership type specific message template settings
+    // 3rd remminder
+    $settingsArray['enable_third_reminder'] = 0;
+    if (isset($values['enable_third_reminder']) && $values['enable_third_reminder'] == 1) {
+      $settingsArray['enable_third_reminder'] = 1;
+      $settingsArray['renewal_third_reminder'] = $values['renewal_third_reminder'];
+    }
+
+    //MV:03Jan2018 update test mode in setting
+    $settingsArray['is_test'] = $values['is_test'];
+    
+		//// Membership type specific message template settings
     // Get all membership types
     $memTypes = CRM_Membershiprenewal_Utils::getAllMembershipTypes();
 
@@ -526,6 +632,10 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
       $settingsArray['cut_off_date'] = CRM_Utils_Date::processDate($values['cut_off_date']);
       $saveJoinerValues = TRUE;
     }
+    // save membership type
+    if (!empty($values['membership_status'])) {
+      $settingsArray['membership_status'] = $values['membership_status'];
+    }     
     for ($i=1; $i <=1; $i++) {
       $emailElement = 'joiner_email_message_template_'.$i;
       $letterElement = 'joiner_letter_message_template_'.$i;
@@ -564,6 +674,12 @@ class CRM_Membershiprenewal_Form_Membershiprenewalsettings extends CRM_Core_Form
     $settingsArray['enable_word_mailmerge'] = 0;
     if (isset($values['enable_word_mailmerge']) && $values['enable_word_mailmerge'] == 1) {
       $settingsArray['enable_word_mailmerge'] = 1;
+    }
+
+    // Enable Attachment
+    $settingsArray['enable_attachment'] = 0;
+    if (isset($values['enable_attachment']) && $values['enable_attachment'] == 1) {
+      $settingsArray['enable_attachment'] = 1;
     }
 
     $settingsStr = serialize($settingsArray);
